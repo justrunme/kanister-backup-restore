@@ -1,12 +1,17 @@
 # Changelog
 
+## 0.4.0 — 2026-09-06
+
+- **Recovery Contract** replaces percentage confidence scoring
+- Binary verdict: **PROVED** / **UNPROVED** with explicit Reason
+- Lifecycle: **PROTECT → VALIDATE → RESTORE → PROVE**
+- `make failure-drill SCENARIO=…` for deliberate failure modes
+- Drill evidence card with RPO / RTO / evidence age
+- README visual: `docs/assets/recovery-lifecycle.svg`
+
 ## 0.3.0 — 2026-09-06
 
-- **Continuous Recovery Confidence** concept: deterministic score + state machine
-- **Recovery SLO** (MET/BREACHED) with RTO and evidence-age targets
-- Failure injection: `break-backup|secret|schema|rto` + scenario demos
-- `make recovery-drill` / `make full-drill` emit `.evidence` JSON + confidence card
-- Positioning: Protect → Break → Restore → Prove
+- Continuous Recovery Confidence prototype (score + SLO + break scenarios)
 
 ## 0.2.0 — 2026-09-06
 

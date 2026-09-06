@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 560" role="img" aria-labelledby="title desc">
+  <title id="title">Recovery Contract lifecycle</title>
+  <desc id="desc">PROTECT, VALIDATE, RESTORE, PROVE  binary Recovery Contract with live drill evidence.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0a1020"/>
+      <stop offset="55%" stop-color="#111b30"/>
+      <stop offset="100%" stop-color="#0d1528"/>
+    </linearGradient>
+    <linearGradient id="accentG" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#2dd4bf"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+    <linearGradient id="prove" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#052e1c"/>
+      <stop offset="100%" stop-color="#0b3d2e"/>
+    </linearGradient>
+    <filter id="soft" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7dd3fc"/>
+    </marker>
+    <style>
+      .title { font: 800 26px ui-sans-serif, system-ui, sans-serif; fill: #f1f5f9; }
+      .sub { font: 500 13px ui-sans-serif, system-ui, sans-serif; fill: #94a3b8; }
+      .chip { font: 700 10px ui-sans-serif, system-ui, sans-serif; fill: #0f172a; }
+      .stage { font: 800 14px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #e2e8f0; letter-spacing: .06em; }
+      .metric { font: 600 11px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #94a3b8; }
+      .box { fill: #0f1a2d; stroke: #3b536f; stroke-width: 1.6; }
+      .boxOk { fill: #052e1c; stroke: #34d399; stroke-width: 1.8; }
+      .flow { fill: none; stroke: #7dd3fc; stroke-width: 2.2; marker-end: url(#arrow); }
+      .card-t { font: 700 11px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #7dd3fc; letter-spacing: .1em; }
+      .row { font: 600 12px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #cbd5e1; }
+      .pass { fill: #34d399; }
+      .verdict { font: 800 16px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #86e6b9; letter-spacing: .08em; }
+      .tiny { font: 600 10px ui-sans-serif, system-ui, sans-serif; fill: #64748b; letter-spacing: .04em; }
+    </style>
+  </defs>
+
+  <rect width="1120" height="560" fill="url(#bg)"/>
+  <text x="40" y="42" class="title">Recovery Contract</text>
+  <text x="40" y="66" class="sub">A backup is successful when recovery has been proved  not when the artifact was written</text>
+  <rect x="40" y="80" width="260" height="22" rx="11" fill="url(#accentG)"/>
+  <text x="170" y="95" text-anchor="middle" class="chip">PROTECT ’ VALIDATE ’ RESTORE ’ PROVE</text>
+
+  <!-- Stages -->
+  <g filter="url(#soft)">
+    <rect class="box" x="40" y="140" width="200" height="120" rx="14"/>
+    <text x="140" y="178" text-anchor="middle" class="stage">PROTECT</text>
+    <text x="140" y="208" text-anchor="middle" class="metric">pg_dump · kando push</text>
+    <text x="140" y="230" text-anchor="middle" class="metric">ActionSet complete</text>
+  </g>
+  <path class="flow" d="M250 200 H290"/>
+
+  <g filter="url(#soft)">
+    <rect class="box" x="300" y="140" width="200" height="120" rx="14"/>
+    <text x="400" y="178" text-anchor="middle" class="stage">VALIDATE</text>
+    <text x="400" y="208" text-anchor="middle" class="metric">gzip integrity</text>
+    <text x="400" y="230" text-anchor="middle" class="metric">SQL head check</text>
+  </g>
+  <path class="flow" d="M510 200 H550"/>
+
+  <g filter="url(#soft)">
+    <rect class="box" x="560" y="140" width="200" height="120" rx="14"/>
+    <text x="660" y="178" text-anchor="middle" class="stage">RESTORE</text>
+    <text x="660" y="208" text-anchor="middle" class="metric">isolated namespace</text>
+    <text x="660" y="230" text-anchor="middle" class="metric">kando pull · apply</text>
+  </g>
+  <path class="flow" d="M770 200 H810"/>
+
+  <g filter="url(#soft)">
+    <rect class="boxOk" x="820" y="140" width="260" height="120" rx="14"/>
+    <text x="950" y="178" text-anchor="middle" class="stage" style="fill:#ecfdf5">PROVE</text>
+    <text x="950" y="208" text-anchor="middle" class="metric" style="fill:#a7f3d0">contract clauses</text>
+    <text x="950" y="230" text-anchor="middle" class="verdict" style="font-size:14px">PROVED</text>
+  </g>
+
+  <!-- Evidence card -->
+  <g filter="url(#soft)" transform="translate(40 300)">
+    <rect x="0" y="0" width="520" height="220" rx="16" fill="#0f1a2d" stroke="#334155" stroke-width="1.5"/>
+    <text x="24" y="32" class="card-t">RECOVERY DRILL #0042</text>
+    <circle cx="488" cy="26" r="5" fill="#34d399">
+      <animate attributeName="opacity" values="1;.4;1" dur="2s" repeatCount="indefinite"/>
+    </circle>
+    <text x="24" y="68" class="row">Backup</text><text x="480" y="68" text-anchor="end" class="row pass">PASS</text>
+    <text x="24" y="96" class="row">Artifact integrity</text><text x="480" y="96" text-anchor="end" class="row pass">PASS</text>
+    <text x="24" y="124" class="row">Isolated restore</text><text x="480" y="124" text-anchor="end" class="row pass">PASS</text>
+    <text x="24" y="152" class="row">Application ready</text><text x="480" y="152" text-anchor="end" class="row pass">PASS</text>
+    <text x="24" y="180" class="row">Recovery marker</text><text x="480" y="180" text-anchor="end" class="row pass">PASS</text>
+    <text x="24" y="208" class="verdict" style="font-size:13px">Ï RECOVERY PROVED</text>
+  </g>
+
+  <g filter="url(#soft)" transform="translate(580 300)">
+    <rect x="0" y="0" width="500" height="220" rx="16" fill="#0f1a2d" stroke="#334155" stroke-width="1.5"/>
+    <text x="24" y="32" class="card-t">RECOVERY CONTRACT</text>
+    <text x="24" y="72" class="row">Artifact integrity</text><text x="460" y="72" text-anchor="end" class="metric">required</text>
+    <text x="24" y="100" class="row">Isolated restore</text><text x="460" y="100" text-anchor="end" class="metric">required</text>
+    <text x="24" y="128" class="row">Data verification</text><text x="460" y="128" text-anchor="end" class="metric">required</text>
+    <text x="24" y="156" class="row">RTO</text><text x="460" y="156" text-anchor="end" class="metric">&lt; 60s · observed 38s</text>
+    <text x="24" y="184" class="row">Evidence freshness</text><text x="460" y="184" text-anchor="end" class="metric">&lt; 24h · 0m</text>
+    <text x="24" y="208" class="tiny">BINARY VERDICT · NO PERCENTAGE SCORE</text>
+  </g>
+</svg>

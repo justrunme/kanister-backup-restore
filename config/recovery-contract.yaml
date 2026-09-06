@@ -1,0 +1,29 @@
+# Recovery Contract — measurable prove of recoverability.
+# Verdict is binary: PROVED | UNPROVED. No percentage scores.
+
+version: 1
+name: recovery-contract
+tagline: Restore should be proved, not assumed.
+lifecycle: PROTECT → VALIDATE → RESTORE → PROVE
+
+contract:
+  artifact_integrity: required
+  isolated_restore: required
+  application_ready: required
+  data_verification: required
+  rto_seconds_max: 60
+  evidence_freshness_hours_max: 24
+
+failure_scenarios:
+  corrupt-artifact:
+    description: Corrupt object-store artifact so VALIDATE fails
+    expected_reason: artifact_integrity
+  wrong-secret:
+    description: Wrong DB credentials so RESTORE fails
+    expected_reason: isolated_restore
+  schema-drift:
+    description: Drop recovery_markers so DATA VERIFY fails
+    expected_reason: data_verification
+  slow-restore:
+    description: Inject delay so RTO exceeds contract
+    expected_reason: rto

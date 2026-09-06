@@ -1,9 +1,13 @@
-# Continuous Recovery Confidence
+# Kanister Recovery Contract
 
 **Restore should be proved, not assumed.**
 
-A backup is not successful when it is created.  
-It is successful when its **recovery has been proved** — continuously, against Recovery SLOs, with evidence.
+<p align="center">
+  <img src="docs/assets/recovery-lifecycle.svg" alt="PROTECT → VALIDATE → RESTORE → PROVE" width="100%" />
+</p>
+
+Kanister already gives you Blueprints, ActionSets, and Profiles.  
+This repository adds the missing layer: a **Recovery Contract** that turns a backup into a measurable proof of recoverability.
 
 [![CI](https://github.com/justrunme/kanister-backup-restore/actions/workflows/ci.yml/badge.svg)](https://github.com/justrunme/kanister-backup-restore/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
@@ -12,55 +16,51 @@ It is successful when its **recovery has been proved** — continuously, against
 Case study: [Kanister Backup & Restore](https://justrunme.com/cases/kanister-backup-restore/) · [Andrey Lesnikov](https://justrunme.com/)
 
 ```text
-Protect → Break → Restore → Prove
+PROTECT → VALIDATE → RESTORE → PROVE
 ```
+
+Verdict is binary: **PROVED** or **UNPROVED**.  
+No percentage scores — only contract clauses and measured RTO / RPO / freshness.
 
 ---
 
-## The idea
-
-Kanister already gives you Blueprints, ActionSets, and Profiles.  
-This repository adds the missing platform layer:
-
-**Continuous Recovery Confidence** — deterministic scoring of whether you should trust a specific backup *right now*.
+## Recovery Contract
 
 ```text
-BACKUP → ARTIFACT → VALIDATE → ISOLATED RESTORE → VERIFY APP → EVIDENCE → CONFIDENCE
+RECOVERY CONTRACT
+Artifact integrity       required
+Isolated restore         required
+Application ready        required
+Data verification        required
+RTO                      < 60s
+Evidence freshness       < 24h
 ```
 
-| State | Meaning |
-|---|---|
-| `UNPROVEN` | No successful validation yet |
-| `VALIDATED` | Artifact integrity proved |
-| `RESTORED` | Isolated restore completed |
-| `VERIFIED` | App healthy + data markers present |
-| `PROVED` | All checks + RTO + fresh evidence |
-
-### Deterministic score (never random)
-
-| Check | Points |
-|---|---:|
-| Artifact integrity | 20 |
-| Restore completed | 25 |
-| Application health | 20 |
-| Data verification | 20 |
-| RTO within target | 10 |
-| Evidence fresh | 5 |
-| **Total** | **100** |
-
-### Recovery SLO
-
-Production SLOs ask: *is the service up?*  
-Recovery SLOs ask: *if it disappears now, how sure are we we can bring it back?*
+After `make full-drill` (or `make recovery-drill`):
 
 ```text
-Restore success     required
-RTO                 < 60s
-Evidence age        < 24h
-Artifact integrity  PASS
-Data verification   PASS
-→ RECOVERY SLO      MET | BREACHED
+RECOVERY DRILL #0042
+Backup                 PASS
+Artifact integrity     PASS
+Isolated restore       PASS
+Application ready      PASS
+Recovery marker        PASS
+RPO                     3m 41s
+RTO                       38s
+Evidence age              0m
+RECOVERY                 PROVED
 ```
+
+Evidence: `.evidence/recovery-verdict.md` + `.evidence/recovery-verdict.json`
+
+---
+
+## Why this exists
+
+A VolumeSnapshot preserves bytes.  
+Application recovery needs logical order, secrets/context, artifact validation, an isolated drill, and evidence.
+
+This pack runs that path for real: Kind, Kanister, MinIO Profile, `pg_dump`, `kando location push/pull`, gzip validation, isolated restore namespace, recovery markers — then evaluates the **contract**.
 
 ---
 
@@ -70,44 +70,35 @@ Data verification   PASS
 make full-drill
 ```
 
-Happy path ends in a console card:
-
-```text
-RECOVERY CONFIDENCE
-State           PROVED
-Confidence       100 / 100
-Recovery SLO    MET
-```
-
-Evidence lands in `.evidence/recovery-confidence.md`.
-
 ---
 
-## Deliberately break it
+## Failure drills
 
-Prove which failure modes make a backup worthless:
-
-```bash
-make scenario-corrupt   # VALIDATE fails · confidence collapses
-make scenario-secret    # RESTORE auth fails
-make scenario-schema    # DATA VERIFY fails after restore
-make scenario-rto       # RTO breaches Recovery SLO
-```
-
-Or arm manually:
+Show which failure modes make a backup untrustworthy:
 
 ```bash
-make backup-drill
-make break-backup       # corrupt object in MinIO
-make recovery-drill     # expect VALIDATED? no — blocked at validate
+make failure-drill SCENARIO=corrupt-artifact
+make failure-drill SCENARIO=wrong-secret
+make failure-drill SCENARIO=schema-drift
+make failure-drill SCENARIO=slow-restore
 ```
 
-| Scenario | Blocked at | What you learn |
+Example (corrupt artifact):
+
+```text
+Backup                 PASS
+Artifact integrity     FAIL
+Isolated restore       BLOCKED
+RECOVERY               UNPROVED
+Reason                 artifact_integrity
+```
+
+| Scenario | Reason | What you learn |
 |---|---|---|
-| `corrupt-artifact` | validate | Creation ≠ recoverability |
-| `wrong-secret` | restore | Credentials are part of the recovery contract |
-| `schema-drift` | verify | Bytes restored ≠ application verified |
-| `slow-restore` | rto | Success without RTO still BREACHES Recovery SLO |
+| `corrupt-artifact` | `artifact_integrity` | Creation ≠ recoverability |
+| `wrong-secret` | `isolated_restore` | Credentials are part of the contract |
+| `schema-drift` | `data_verification` | Bytes restored ≠ application verified |
+| `slow-restore` | `rto` | Success without RTO still UNPROVED |
 
 ---
 
@@ -116,9 +107,9 @@ make recovery-drill     # expect VALIDATED? no — blocked at validate
 | Target | Purpose |
 |---|---|
 | `make full-drill` | Kind + Kanister + MinIO + happy-path prove |
-| `make recovery-drill` | Protect → optional break → restore → confidence |
-| `make confidence` | Recompute score/SLO from latest evidence JSON |
-| `make break-*` / `scenario-*` | Failure injection demos |
+| `make recovery-drill` | PROTECT → VALIDATE → RESTORE → PROVE |
+| `make prove` | Re-evaluate latest evidence against the contract |
+| `make failure-drill SCENARIO=…` | Inject failure → expect UNPROVED |
 | `make evidence` | ActionSet inventory markdown |
 
 ---
@@ -126,27 +117,26 @@ make recovery-drill     # expect VALIDATED? no — blocked at validate
 ## Layout
 
 ```text
-config/recovery-slo.yaml     Weights + SLO targets
-scripts/recovery-drill.sh    Prove loop
-scripts/break.sh             Failure injection
-scripts/compute-confidence.sh
-blueprints/postgres/         Real pg_dump + kando push/pull
-deploy/minio-profile.yaml
-.evidence/                   Drill JSON + confidence reports
+config/recovery-contract.yaml   Contract clauses (no scores)
+docs/assets/recovery-lifecycle.svg
+scripts/recovery-drill.sh       Prove loop
+scripts/evaluate-contract.sh    PROVED | UNPROVED
+scripts/failure-drill.sh        Failure injection entrypoint
+scripts/break.sh                Scenario arming
+blueprints/postgres/            Real pg_dump + kando push/pull
+.evidence/                      Drill JSON + verdict
 ```
 
 ---
 
 ## Philosophy
 
-Same school as the rest of the platform work:
-
 | Project | Prove |
 |---|---|
 | Architecture Rehearsal | the change |
 | TwinOps | state convergence |
 | AI Infra Control Plane | governance decisions |
-| **This repo** | **recovery** |
+| **This repo** | **recovery before the incident** |
 
 Assumptions → evidence.
 

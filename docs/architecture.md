@@ -1,39 +1,35 @@
-# Architecture — Continuous Recovery Confidence
+# Architecture — Recovery Contract
 
 ```text
-Protect → Break → Restore → Prove
+PROTECT → VALIDATE → RESTORE → PROVE
 ```
-
-## Control loop
-
-```text
-Workload
-  → Kanister Blueprint / ActionSet (backup)
-  → Object store artifact (Profile)
-  → Validate (gzip + SQL head)
-  → Isolated restore-drill-* namespace
-  → Application + data verification
-  → Deterministic confidence score + Recovery SLO
-  → Evidence (.evidence/)
-```
-
-## Why not “just Kanister”?
 
 Kanister is the execution engine (Blueprints, ActionSets, Profiles).  
-This repository is the **assurance layer**: continuous proof that a backup is still recoverable against explicit objectives.
+This repository is the **assurance layer**: a Recovery Contract with a binary verdict.
 
-## Score
+## Contract
 
-See `config/recovery-slo.yaml` — weights sum to 100.  
-No randomness. Failed checks contribute zero.
+See `config/recovery-contract.yaml`:
 
-## States
+- artifact integrity — required
+- isolated restore — required
+- application ready — required
+- data verification — required
+- RTO — &lt; 60s
+- evidence freshness — &lt; 24h
 
-`UNPROVEN → VALIDATED → RESTORED → VERIFIED → PROVED`
+**PROVED** only when every clause passes.  
+Otherwise **UNPROVED** with an explicit `Reason`.
+
+No percentage scores.
 
 ## Failure injection
 
-Break scenarios exist to show *when* confidence must collapse — not to decorate the happy path.
+`make failure-drill SCENARIO=corrupt-artifact` (and siblings) prove when confidence must collapse — separately from the happy path.
+
+## Visual
+
+`docs/assets/recovery-lifecycle.svg`
 
 ## Case study
 

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Continuous Recovery Confidence drill:
-# Protect → (optional Break) → Restore → Prove → Confidence / SLO
+# Recovery Contract drill: PROTECT → VALIDATE → RESTORE → PROVE
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -8,17 +7,17 @@ PROFILE_NS="${PROFILE_NS:-kanister}"
 PROFILE_NAME="${PROFILE_NAME:-minio-profile}"
 EVIDENCE_DIR="${EVIDENCE_DIR:-$ROOT/.evidence}"
 STATE_FILE="$EVIDENCE_DIR/active-break.env"
+SEQ_FILE="$EVIDENCE_DIR/drill-seq"
 mkdir -p "$EVIDENCE_DIR"
 
 SCENARIO="happy-path"
-EXPECTED_BLOCKED_AT=""
 if [[ -f "$STATE_FILE" ]]; then
   # shellcheck disable=SC1090
   source "$STATE_FILE"
   SCENARIO="${BREAK_SCENARIO:-happy-path}"
-  EXPECTED_BLOCKED_AT="${EXPECTED_BLOCKED_AT:-}"
 fi
 
+checks_backup=false
 checks_artifact=false
 checks_restore=false
 checks_health=false
@@ -26,18 +25,84 @@ checks_data=false
 checks_rto=false
 checks_fresh=true
 RTO_SECONDS=""
+RPO_SECONDS=""
 DRILL_NS=""
 BACKUP_AS=""
 RESTORE_AS=""
 BACKUP_LOC=""
 BLOCKED_AT=""
 
-ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 now_epoch() { date -u +%s; }
 
-echo "== Recovery Confidence drill · scenario=${SCENARIO} =="
+DRILL_ID=1
+if [[ -f "$SEQ_FILE" ]]; then
+  DRILL_ID=$(( $(cat "$SEQ_FILE") + 1 ))
+fi
+echo "$DRILL_ID" > "$SEQ_FILE"
 
-# 1) Protect — ensure backup exists (reuse latest complete or create)
+echo "== Recovery Contract drill #${DRILL_ID} · scenario=${SCENARIO} =="
+echo "== PROTECT → VALIDATE → RESTORE → PROVE =="
+
+emit_evidence() {
+  python3 - "$EVIDENCE_DIR" "$DRILL_ID" "$SCENARIO" "$BLOCKED_AT" \
+    "$BACKUP_AS" "$RESTORE_AS" "$DRILL_NS" "$BACKUP_LOC" \
+    "$checks_backup" "$checks_artifact" "$checks_restore" \
+    "$checks_health" "$checks_data" "$checks_rto" "$checks_fresh" \
+    "${RPO_SECONDS}" "${RTO_SECONDS}" <<'PY'
+import json, sys, pathlib
+from datetime import datetime, timezone
+
+(
+  out_dir, drill_id, scenario, blocked, backup_as, restore_as, drill_ns, backup_loc,
+  c_backup, c_art, c_rest, c_health, c_data, c_rto, c_fresh, rpo, rto,
+) = sys.argv[1:]
+
+def b(x):
+  return str(x).lower() in ("true", "1", "yes")
+
+def ni(x):
+  return int(x) if x not in ("", "null", "None") else None
+
+ev = {
+  "drill_id": int(drill_id),
+  "scenario": scenario,
+  "blocked_at": blocked or None,
+  "backup_actionset": backup_as or None,
+  "restore_actionset": restore_as or None,
+  "drill_namespace": drill_ns or None,
+  "backup_location": backup_loc or None,
+  "collected_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+  "checks": {
+    "backup": b(c_backup),
+    "artifact_integrity": b(c_art),
+    "restore_completed": b(c_rest),
+    "application_health": b(c_health),
+    "data_verification": b(c_data),
+    "rto_within_target": b(c_rto),
+    "evidence_fresh": b(c_fresh),
+  },
+  "metrics": {
+    "rpo_seconds": ni(rpo),
+    "rto_seconds": ni(rto),
+    "evidence_age_hours": 0,
+    "drill_id": int(drill_id),
+  },
+}
+out = pathlib.Path(out_dir)
+latest = out / "drill-latest.json"
+latest.write_text(json.dumps(ev, indent=2) + "\n")
+stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+(out / f"drill-{stamp}.json").write_text(latest.read_text())
+print(f"wrote {latest}")
+PY
+  "$ROOT/scripts/evaluate-contract.sh" "$EVIDENCE_DIR/drill-latest.json" || true
+  if [[ "$SCENARIO" != "happy-path" ]]; then
+    rm -f "$STATE_FILE"
+    echo "-- failure scenario state cleared"
+  fi
+}
+
+# --- PROTECT ---
 BACKUP_AS="$(kubectl -n "$PROFILE_NS" get actionsets -l justrunme.com/phase=backup --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)"
 BACKUP_STATE=""
 if [[ -n "$BACKUP_AS" ]]; then
@@ -47,11 +112,35 @@ if [[ "$BACKUP_STATE" != "complete" ]]; then
   echo "-- protect: creating backup"
   "$ROOT/scripts/backup-drill.sh"
   BACKUP_AS="$(kubectl -n "$PROFILE_NS" get actionsets -l justrunme.com/phase=backup --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}')"
+  BACKUP_STATE="$(kubectl -n "$PROFILE_NS" get "actionset/${BACKUP_AS}" -o jsonpath='{.status.state}' 2>/dev/null || true)"
 fi
-BACKUP_LOC="$(kubectl -n "$PROFILE_NS" get "actionset/${BACKUP_AS}" -o jsonpath='{.status.actions[0].artifacts.cloudObject.keyValue.backupLocation}')"
-echo "-- protect: backup=${BACKUP_AS} loc=${BACKUP_LOC}"
 
-# 2) Validate artifact (unless we expect validate block — still run to capture failure)
+if [[ "$BACKUP_STATE" == "complete" ]]; then
+  checks_backup=true
+else
+  BLOCKED_AT="protect"
+fi
+
+BACKUP_LOC="$(kubectl -n "$PROFILE_NS" get "actionset/${BACKUP_AS}" -o jsonpath='{.status.actions[0].artifacts.cloudObject.keyValue.backupLocation}' 2>/dev/null || true)"
+BACKUP_CREATED="$(kubectl -n "$PROFILE_NS" get "actionset/${BACKUP_AS}" -o jsonpath='{.metadata.creationTimestamp}' 2>/dev/null || true)"
+if [[ -n "$BACKUP_CREATED" ]]; then
+  if BACKUP_EPOCH=$(date -u -d "$BACKUP_CREATED" +%s 2>/dev/null); then
+    :
+  else
+    BACKUP_EPOCH=$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "${BACKUP_CREATED}" +%s 2>/dev/null || true)
+  fi
+  if [[ -n "${BACKUP_EPOCH:-}" ]]; then
+    RPO_SECONDS=$(( $(now_epoch) - BACKUP_EPOCH ))
+  fi
+fi
+echo "-- protect: backup=${BACKUP_AS} ($([[ $checks_backup == true ]] && echo PASS || echo FAIL))"
+
+if [[ "$checks_backup" != true ]]; then
+  emit_evidence
+  exit 0
+fi
+
+# --- VALIDATE ---
 echo "-- validate artifact"
 set +e
 FROM_ACTIONSET="$BACKUP_AS" ACTION=validate "$ROOT/scripts/run-action.sh"
@@ -61,49 +150,17 @@ if [[ $VAL_RC -eq 0 ]]; then
   checks_artifact=true
   echo "   artifact_integrity PASS"
 else
-  checks_artifact=false
   BLOCKED_AT="validate"
   echo "   artifact_integrity FAIL"
-  if [[ "$SCENARIO" == "corrupt-artifact" ]]; then
-    echo "   expected failure for corrupt-artifact"
-  fi
 fi
 
-# Early exit for corrupt path — cannot restore safely
 if [[ "$checks_artifact" != true ]]; then
   RTO_SECONDS=0
-  checks_rto=false
-  checks_fresh=true
-  # write evidence + score
-  cat > "$EVIDENCE_DIR/drill-latest.json" <<JSON
-{
-  "scenario": "${SCENARIO}",
-  "blocked_at": "${BLOCKED_AT}",
-  "backup_actionset": "${BACKUP_AS}",
-  "restore_actionset": null,
-  "drill_namespace": null,
-  "backup_location": "${BACKUP_LOC}",
-  "collected_at": "$(ts)",
-  "checks": {
-    "artifact_integrity": false,
-    "restore_completed": false,
-    "application_health": false,
-    "data_verification": false,
-    "rto_within_target": false,
-    "evidence_fresh": true
-  },
-  "metrics": {
-    "rto_seconds": 0,
-    "evidence_age_hours": 0
-  }
-}
-JSON
-  cp "$EVIDENCE_DIR/drill-latest.json" "$EVIDENCE_DIR/drill-$(date -u +%Y%m%dT%H%M%SZ).json"
-  "$ROOT/scripts/compute-confidence.sh" "$EVIDENCE_DIR/drill-latest.json" || true
+  emit_evidence
   exit 0
 fi
 
-# 3) Restore into isolated namespace (apply break hooks)
+# --- RESTORE ---
 DRILL_NS="restore-drill-$(date -u +%Y%m%d%H%M%S)"
 RESTORE_AS="restore-postgres-$(date -u +%Y%m%d%H%M%S)"
 echo "-- restore into ${DRILL_NS}"
@@ -171,22 +228,20 @@ RTO_SECONDS=$((END - START))
 
 if [[ "$RESTORE_OK" == true ]]; then
   checks_restore=true
-  echo "   restore_completed PASS (rto=${RTO_SECONDS}s)"
+  echo "   isolated_restore PASS (rto=${RTO_SECONDS}s)"
 else
-  checks_restore=false
   BLOCKED_AT="${BLOCKED_AT:-restore}"
-  echo "   restore_completed FAIL"
+  echo "   isolated_restore FAIL"
 fi
 
-# 4) Verify application + data
+# --- PROVE ---
 if [[ "$checks_restore" == true ]]; then
   if kubectl -n "$DRILL_NS" exec sts/postgres -- pg_isready -U postgres >/dev/null 2>&1; then
     checks_health=true
-    echo "   application_health PASS"
+    echo "   application_ready PASS"
   else
-    checks_health=false
     BLOCKED_AT="${BLOCKED_AT:-verify}"
-    echo "   application_health FAIL"
+    echo "   application_ready FAIL"
   fi
 
   if [[ "$SCENARIO" == "schema-drift" ]]; then
@@ -200,13 +255,11 @@ if [[ "$checks_restore" == true ]]; then
     checks_data=true
     echo "   data_verification PASS"
   else
-    checks_data=false
     BLOCKED_AT="${BLOCKED_AT:-verify}"
     echo "   data_verification FAIL"
   fi
 fi
 
-# RTO check
 RTO_TARGET=60
 if [[ -n "$RTO_SECONDS" && "$RTO_SECONDS" -le "$RTO_TARGET" && "$checks_restore" == true ]]; then
   checks_rto=true
@@ -216,41 +269,8 @@ else
     BLOCKED_AT="${BLOCKED_AT:-rto}"
   fi
 fi
-echo "   rto_within_target $([[ $checks_rto == true ]] && echo PASS || echo FAIL) (${RTO_SECONDS}s / ${RTO_TARGET}s)"
-
-# Evidence freshness: this prove is now
+echo "   rto $([[ $checks_rto == true ]] && echo PASS || echo FAIL) (${RTO_SECONDS}s / ${RTO_TARGET}s)"
 checks_fresh=true
 
-cat > "$EVIDENCE_DIR/drill-latest.json" <<JSON
-{
-  "scenario": "${SCENARIO}",
-  "blocked_at": "${BLOCKED_AT}",
-  "backup_actionset": "${BACKUP_AS}",
-  "restore_actionset": "${RESTORE_AS}",
-  "drill_namespace": "${DRILL_NS}",
-  "backup_location": "${BACKUP_LOC}",
-  "collected_at": "$(ts)",
-  "checks": {
-    "artifact_integrity": $([[ $checks_artifact == true ]] && echo true || echo false),
-    "restore_completed": $([[ $checks_restore == true ]] && echo true || echo false),
-    "application_health": $([[ $checks_health == true ]] && echo true || echo false),
-    "data_verification": $([[ $checks_data == true ]] && echo true || echo false),
-    "rto_within_target": $([[ $checks_rto == true ]] && echo true || echo false),
-    "evidence_fresh": $([[ $checks_fresh == true ]] && echo true || echo false)
-  },
-  "metrics": {
-    "rto_seconds": ${RTO_SECONDS:-null},
-    "evidence_age_hours": 0
-  }
-}
-JSON
-cp "$EVIDENCE_DIR/drill-latest.json" "$EVIDENCE_DIR/drill-$(date -u +%Y%m%dT%H%M%SZ).json"
-
-"$ROOT/scripts/compute-confidence.sh" "$EVIDENCE_DIR/drill-latest.json" || true
+emit_evidence
 "$ROOT/scripts/collect-evidence.sh" || true
-
-# Clear one-shot break state after drill (except user may want to re-run)
-if [[ "$SCENARIO" != "happy-path" ]]; then
-  rm -f "$STATE_FILE"
-  echo "-- break state cleared after drill"
-fi
