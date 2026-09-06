@@ -1,159 +1,154 @@
-# Kanister Backup & Restore
+# Continuous Recovery Confidence
 
 **Restore should be proved, not assumed.**
 
-Production-minded Kanister pack for application-aware Kubernetes recovery:
-
-```text
-Blueprint → Backup → Validate → Restore drill → Evidence
-```
+A backup is not successful when it is created.  
+It is successful when its **recovery has been proved** — continuously, against Recovery SLOs, with evidence.
 
 [![CI](https://github.com/justrunme/kanister-backup-restore/actions/workflows/ci.yml/badge.svg)](https://github.com/justrunme/kanister-backup-restore/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Case study](https://img.shields.io/badge/case-justrunme.com-111111)](https://justrunme.com/cases/kanister-backup-restore/)
 
-**Status:** working Kind drill with MinIO Profile, real `kando location push/pull`, Postgres seed → backup → gzip validate → restore into isolated namespace.
-
 Case study: [Kanister Backup & Restore](https://justrunme.com/cases/kanister-backup-restore/) · [Andrey Lesnikov](https://justrunme.com/)
 
----
-
-## Why this exists
-
-A VolumeSnapshot preserves bytes. Production restores also need:
-
-- logical application order (`pg_dump` / filesystem contract)
-- secrets + namespace context
-- artifact validation **before** trust
-- an isolated restore drill
-- an evidence trail operators can show
-
-This repository turns that into a platform capability you can run on a schedule.
-
----
-
-## How it works
-
-```mermaid
-flowchart LR
-  Workload[(Postgres STS)] --> BP[Blueprint]
-  BP --> AS[ActionSet backup]
-  AS --> Obj[(MinIO / S3)]
-  Obj --> Val[ActionSet validate]
-  Val --> Drill[ActionSet restore]
-  Drill --> NS[(restore-drill-*)]
-  AS --> Ev[Evidence markdown]
-  Val --> Ev
-  Drill --> Ev
+```text
+Protect → Break → Restore → Prove
 ```
 
-| Step | Mechanism |
+---
+
+## The idea
+
+Kanister already gives you Blueprints, ActionSets, and Profiles.  
+This repository adds the missing platform layer:
+
+**Continuous Recovery Confidence** — deterministic scoring of whether you should trust a specific backup *right now*.
+
+```text
+BACKUP → ARTIFACT → VALIDATE → ISOLATED RESTORE → VERIFY APP → EVIDENCE → CONFIDENCE
+```
+
+| State | Meaning |
 |---|---|
-| **Declare** | `postgres-app-aware` Blueprint (`backup` / `validate` / `restore` / `delete`) |
-| **Backup** | `pg_dump \| gzip \| kando location push` into Profile object store |
-| **Validate** | Pull artifact, `gzip -t`, sample SQL head — fail closed |
-| **Restore drill** | Fresh namespace + STS, `kando location pull \| psql` |
-| **Evidence** | `scripts/collect-evidence.sh` snapshots ActionSets + artifact path |
+| `UNPROVEN` | No successful validation yet |
+| `VALIDATED` | Artifact integrity proved |
+| `RESTORED` | Isolated restore completed |
+| `VERIFIED` | App healthy + data markers present |
+| `PROVED` | All checks + RTO + fresh evidence |
+
+### Deterministic score (never random)
+
+| Check | Points |
+|---|---:|
+| Artifact integrity | 20 |
+| Restore completed | 25 |
+| Application health | 20 |
+| Data verification | 20 |
+| RTO within target | 10 |
+| Evidence fresh | 5 |
+| **Total** | **100** |
+
+### Recovery SLO
+
+Production SLOs ask: *is the service up?*  
+Recovery SLOs ask: *if it disappears now, how sure are we we can bring it back?*
+
+```text
+Restore success     required
+RTO                 < 60s
+Evidence age        < 24h
+Artifact integrity  PASS
+Data verification   PASS
+→ RECOVERY SLO      MET | BREACHED
+```
 
 ---
 
-## One-command Kind drill
-
-Prerequisites: `docker`, `kind`, `kubectl`, `helm`.
+## Quickstart
 
 ```bash
 make full-drill
 ```
 
-This will:
-
-1. Create Kind cluster `kanister-drill`
-2. Install Kanister operator (Helm)
-3. Deploy MinIO + bootstrap bucket `kanister-drills` + Profile
-4. Apply blueprints
-5. Deploy demo Postgres, seed `recovery_markers`
-6. Backup → validate → restore into `restore-drill-*`
-7. Write `evidence-*.md`
-
-Individual steps:
-
-```bash
-make kind-up
-make install-kanister
-make minio
-make apply-blueprints
-make demo-app
-make backup-drill
-make validate-backup
-make restore-drill
-make evidence
-```
-
----
-
-## Repository layout
+Happy path ends in a console card:
 
 ```text
-blueprints/postgres/     Real pg_dump Blueprint (kando + Profile)
-blueprints/generic-pvc/  Filesystem tar Blueprint (optional path)
+RECOVERY CONFIDENCE
+State           PROVED
+Confidence       100 / 100
+Recovery SLO    MET
+```
+
+Evidence lands in `.evidence/recovery-confidence.md`.
+
+---
+
+## Deliberately break it
+
+Prove which failure modes make a backup worthless:
+
+```bash
+make scenario-corrupt   # VALIDATE fails · confidence collapses
+make scenario-secret    # RESTORE auth fails
+make scenario-schema    # DATA VERIFY fails after restore
+make scenario-rto       # RTO breaches Recovery SLO
+```
+
+Or arm manually:
+
+```bash
+make backup-drill
+make break-backup       # corrupt object in MinIO
+make recovery-drill     # expect VALIDATED? no — blocked at validate
+```
+
+| Scenario | Blocked at | What you learn |
+|---|---|---|
+| `corrupt-artifact` | validate | Creation ≠ recoverability |
+| `wrong-secret` | restore | Credentials are part of the recovery contract |
+| `schema-drift` | verify | Bytes restored ≠ application verified |
+| `slow-restore` | rto | Success without RTO still BREACHES Recovery SLO |
+
+---
+
+## Make targets
+
+| Target | Purpose |
+|---|---|
+| `make full-drill` | Kind + Kanister + MinIO + happy-path prove |
+| `make recovery-drill` | Protect → optional break → restore → confidence |
+| `make confidence` | Recompute score/SLO from latest evidence JSON |
+| `make break-*` / `scenario-*` | Failure injection demos |
+| `make evidence` | ActionSet inventory markdown |
+
+---
+
+## Layout
+
+```text
+config/recovery-slo.yaml     Weights + SLO targets
+scripts/recovery-drill.sh    Prove loop
+scripts/break.sh             Failure injection
+scripts/compute-confidence.sh
+blueprints/postgres/         Real pg_dump + kando push/pull
 deploy/minio-profile.yaml
-deploy/cronjob-backup-drill.yaml
-examples/postgres-statefulset.yaml
-scripts/                 Kind, install, drills, evidence
-docs/                    Architecture + restore runbook
+.evidence/                   Drill JSON + confidence reports
 ```
 
 ---
 
-## Blueprints
+## Philosophy
 
-### `postgres-app-aware`
+Same school as the rest of the platform work:
 
-Uses `ghcr.io/kanisterio/postgres-kanister-tools:0.118.0`.
+| Project | Prove |
+|---|---|
+| Architecture Rehearsal | the change |
+| TwinOps | state convergence |
+| AI Infra Control Plane | governance decisions |
+| **This repo** | **recovery** |
 
-- **backup** — `pg_dump --clean --if-exists` of `POSTGRES_DB`, gzip, `kando location push`
-- **validate** — pull + `gzip -t` + SQL head sniff
-- **restore** — wait `pg_isready`, pull, `psql -v ON_ERROR_STOP=1`
-- **delete** — `kando location delete`
-
-Wired to Secret `postgres-credentials` (`POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`) and Service `postgres` in the target namespace.
-
-### `generic-pvc-app-aware`
-
-Filesystem tar via `kanister-tools` for workloads where logical dump is not the contract. Requires `/data` (or `DATA_DIR`) available to the task pod.
-
----
-
-## Scheduled drills
-
-```bash
-kubectl apply -f deploy/cronjob-backup-drill.yaml
-```
-
-Weekly backup ActionSet against `demo-postgres/postgres`. Pair with validate/restore in your platform pipeline when ready.
-
----
-
-## Evidence
-
-After a drill:
-
-```bash
-make evidence
-```
-
-Produces markdown with blueprints, profile, ActionSet states, and the latest `backupLocation`.
-
----
-
-## Design notes
-
-**Trade-off:** application-aware recovery needs more upfront design than generic snapshots.  
-**Payoff:** recovery can be rehearsed while the platform is calm and explained during incidents.
-
-Not a fork of Kanister upstream — an **operating model** and drill pack: declare → backup → validate → restore → audit.
-
-Related cases: [Automatic SaaS Restore](https://justrunme.com/cases/automatic-saas-restore-system/) · [Self-Healing](https://justrunme.com/cases/self-healing-infrastructure/) · [Architecture Rehearsal](https://justrunme.com/cases/architecture-rehearsal/)
+Assumptions → evidence.
 
 ---
 

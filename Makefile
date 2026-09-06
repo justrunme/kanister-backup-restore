@@ -1,10 +1,13 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: help kind-up install-kanister minio demo-app apply-blueprints backup-drill validate-backup restore-drill full-drill evidence ci cron
+.PHONY: help kind-up install-kanister minio demo-app apply-blueprints backup-drill validate-backup restore-drill full-drill evidence ci cron \
+	recovery-drill confidence \
+	break-backup break-secret break-schema break-rto break-reset \
+	scenario-corrupt scenario-secret scenario-schema scenario-rto
 
 help:
-	@awk 'BEGIN{FS=":.*##"} /^[a-zA-Z_-]+:.*##/{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN{FS=":.*##"} /^[a-zA-Z_-]+:.*##/{printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 kind-up: ## Create Kind cluster
 	chmod +x scripts/*.sh
@@ -25,7 +28,7 @@ demo-app: ## Demo Postgres + seed data
 apply-blueprints: ## Apply Blueprint CRs
 	./scripts/apply-blueprints.sh
 
-backup-drill: ## Backup ActionSet (pg_dump → MinIO)
+backup-drill: ## Protect: backup ActionSet
 	./scripts/backup-drill.sh
 
 validate-backup: ## Validate latest backup artifact
@@ -34,12 +37,46 @@ validate-backup: ## Validate latest backup artifact
 restore-drill: ## Restore into isolated namespace
 	./scripts/restore-drill.sh
 
-full-drill: ## End-to-end Kind drill + evidence
+recovery-drill: ## Protect → Break? → Restore → Prove → Confidence
 	chmod +x scripts/*.sh
-	./scripts/full-drill.sh
+	./scripts/recovery-drill.sh
 
-evidence: ## Collect ActionSet / artifact evidence markdown
+confidence: ## Recompute Recovery Confidence / SLO from latest evidence
+	./scripts/compute-confidence.sh
+
+full-drill: ## Kind bring-up + happy-path recovery confidence drill
+	chmod +x scripts/*.sh
+	./scripts/kind-up.sh
+	./scripts/install-kanister.sh
+	./scripts/minio.sh
+	./scripts/apply-blueprints.sh
+	$(MAKE) demo-app
+	./scripts/break.sh reset
+	./scripts/recovery-drill.sh
+
+evidence: ## Collect ActionSet evidence markdown
 	./scripts/collect-evidence.sh
+
+## Failure scenarios (arm break, then recovery-drill)
+break-backup: ## Corrupt artifact → VALIDATE fails
+	./scripts/break.sh corrupt-artifact
+
+break-secret: ## Wrong DB password → RESTORE fails
+	./scripts/break.sh wrong-secret
+
+break-schema: ## Drop recovery_markers → DATA VERIFY fails
+	./scripts/break.sh schema-drift
+
+break-rto: ## Sleep past RTO target → SLO BREACH
+	./scripts/break.sh slow-restore
+
+break-reset: ## Clear armed break scenario
+	./scripts/break.sh reset
+
+scenario-corrupt: break-backup recovery-drill ## Demo corrupt artifact confidence drop
+scenario-secret: break-secret recovery-drill ## Demo wrong credentials
+scenario-schema: break-schema recovery-drill ## Demo schema drift
+scenario-rto: break-rto recovery-drill ## Demo RTO breach
 
 cron: ## Install weekly backup CronJob
 	kubectl apply -f deploy/cronjob-backup-drill.yaml

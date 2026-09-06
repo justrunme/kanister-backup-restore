@@ -1,0 +1,47 @@
+# Recovery objectives and deterministic scoring weights.
+# Confidence is sum of passed checks — never random.
+
+version: 1
+name: recovery-confidence
+
+weights:
+  artifact_integrity: 20
+  restore_completed: 25
+  application_health: 20
+  data_verification: 20
+  rto_within_target: 10
+  evidence_fresh: 5
+
+# Total = 100
+
+slo:
+  restore_success_target: 1.0          # 100% of drills in window must succeed for MET
+  rto_p95_seconds: 60
+  evidence_max_age_hours: 24
+  artifact_integrity: required
+  data_verification: required
+
+freshness:
+  evidence_fresh_hours: 24             # contributes evidence_fresh points if last prove younger
+
+states:
+  # Highest attained state based on which checks passed
+  UNPROVEN: []
+  VALIDATED: [artifact_integrity]
+  RESTORED: [artifact_integrity, restore_completed]
+  VERIFIED: [artifact_integrity, restore_completed, application_health, data_verification]
+  PROVED: [artifact_integrity, restore_completed, application_health, data_verification, rto_within_target, evidence_fresh]
+
+break_scenarios:
+  corrupt-artifact:
+    description: Truncate / corrupt the object-store backup so gzip validation fails
+    expected_blocked_at: validate
+  wrong-secret:
+    description: Swap Postgres password in drill namespace before restore
+    expected_blocked_at: restore
+  schema-drift:
+    description: Drop recovery_markers before data verification
+    expected_blocked_at: verify
+  slow-restore:
+    description: Inject sleep to breach RTO target
+    expected_blocked_at: rto

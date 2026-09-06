@@ -1,34 +1,39 @@
-# Architecture
-
-Kanister Backup & Restore treats recovery as a **control loop**.
+# Architecture — Continuous Recovery Confidence
 
 ```text
-Workload → Blueprint → ActionSet → Object store (Profile) → Validate → Restore drill → Evidence
+Protect → Break → Restore → Prove
 ```
 
-## Control plane pieces
+## Control loop
 
-| Piece | Role |
-|---|---|
-| **Blueprint** | Declares backup / validate / restore / delete with application semantics |
-| **Profile** | S3-compatible location + credentials (MinIO in Kind drills) |
-| **ActionSet** | One execution against a concrete object (StatefulSet / Deployment) |
-| **kando** | Streams artifacts to/from the Profile (`location push/pull/delete`) |
-| **Drill namespace** | Isolated restore target (`restore-drill-*`) |
-| **Evidence** | Markdown snapshot of ActionSets + artifact path |
+```text
+Workload
+  → Kanister Blueprint / ActionSet (backup)
+  → Object store artifact (Profile)
+  → Validate (gzip + SQL head)
+  → Isolated restore-drill-* namespace
+  → Application + data verification
+  → Deterministic confidence score + Recovery SLO
+  → Evidence (.evidence/)
+```
 
-## Postgres path (default drill)
+## Why not “just Kanister”?
 
-1. Seed table `recovery_markers` in `demo-postgres`
-2. `pg_dump --clean --if-exists | gzip | kando location push`
-3. Validate with `gzip -t` + SQL head sniff
-4. Restore into a new namespace with the same Secret/Service contract
-5. Query `recovery_markers` to prove data returned
+Kanister is the execution engine (Blueprints, ActionSets, Profiles).  
+This repository is the **assurance layer**: continuous proof that a backup is still recoverable against explicit objectives.
 
-## Failure philosophy
+## Score
 
-Validation failures are **hard failures**.  
-A backup that cannot be pulled and inspected is not a backup.
+See `config/recovery-slo.yaml` — weights sum to 100.  
+No randomness. Failed checks contribute zero.
+
+## States
+
+`UNPROVEN → VALIDATED → RESTORED → VERIFIED → PROVED`
+
+## Failure injection
+
+Break scenarios exist to show *when* confidence must collapse — not to decorate the happy path.
 
 ## Case study
 
