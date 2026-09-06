@@ -8,25 +8,24 @@ metadata:
     justrunme.com/workload: postgres
 actions:
   backup:
+    kind: StatefulSet
     outputArtifacts:
-      backupInfo:
+      cloudObject:
         keyValue:
-          backupId: "{{ .Phases.dump.Output.backupId }}"
-          path: "{{ .Phases.dump.Output.path }}"
+          backupLocation: "{{ .Phases.pgDump.Output.backupLocation }}"
           namespace: "{{ .StatefulSet.Namespace }}"
           name: "{{ .StatefulSet.Name }}"
     phases:
-      - func: KubeExec
-        name: dump
+      - func: KubeTask
+        name: pgDump
         objects:
-          postgresPod:
-            kind: Pod
-            name: "{{ index .StatefulSet.Pods 0 }}"
+          pgSecret:
+            kind: Secret
+            name: postgres-credentials
             namespace: "{{ .StatefulSet.Namespace }}"
         args:
+          image: ghcr.io/kanisterio/postgres-kanister-tools:0.118.0
           namespace: "{{ .StatefulSet.Namespace }}"
-          pod: "{{ index .StatefulSet.Pods 0 }}"
-          container: postgres
           command:
             - bash
             - -o
@@ -36,51 +35,63 @@ actions:
             - -c
             - |
               set -euo pipefail
-              BACKUP_ID="pg-$(date -u +%Y%m%dT%H%M%SZ)-$RANDOM"
-              PATH_KEY="postgres/{{ .StatefulSet.Namespace }}/{{ .StatefulSet.Name }}/${BACKUP_ID}.sql.gz"
-              echo "starting logical backup backupId=${BACKUP_ID}"
-              # Placeholder dump path: wire Profile credentials + kanctl push in your environment.
-              # Local drills use scripts/backup-drill.sh to orchestrate ActionSets against a Profile.
-              pg_dump -U "${POSTGRES_USER:-postgres}" "${POSTGRES_DB:-app}" | gzip -c > "/tmp/${BACKUP_ID}.sql.gz"
-              ls -la "/tmp/${BACKUP_ID}.sql.gz"
-              kando output backupId "${BACKUP_ID}"
-              kando output path "${PATH_KEY}"
+              export PGHOST="postgres.{{ .StatefulSet.Namespace }}.svc.cluster.local"
+              export PGPORT="5432"
+              export PGUSER='{{ index .Phases.pgDump.Secrets.pgSecret.Data "POSTGRES_USER" | toString }}'
+              export PGPASSWORD='{{ index .Phases.pgDump.Secrets.pgSecret.Data "POSTGRES_PASSWORD" | toString }}'
+              export PGDATABASE='{{ index .Phases.pgDump.Secrets.pgSecret.Data "POSTGRES_DB" | toString }}'
+              BACKUP_LOCATION="pg_backups/{{ .StatefulSet.Namespace }}/{{ .StatefulSet.Name }}/{{ toDate "2006-01-02T15:04:05.999999999Z07:00" .Time | date "2006-01-02T15:04:05Z07:00" }}/backup.sql.gz"
+              echo "pg_dump host=${PGHOST} db=${PGDATABASE} -> ${BACKUP_LOCATION}"
+              pg_dump --clean --if-exists -U "${PGUSER}" "${PGDATABASE}" \
+                | gzip -c \
+                | kando location push --profile '{{ toJson .Profile }}' --path "${BACKUP_LOCATION}" -
+              kando output backupLocation "${BACKUP_LOCATION}"
 
   validate:
+    kind: StatefulSet
     inputArtifactNames:
-      - backupInfo
+      - cloudObject
     phases:
-      - func: KubeJob
+      - func: KubeTask
         name: checkArtifact
         args:
+          image: ghcr.io/kanisterio/postgres-kanister-tools:0.118.0
           namespace: "{{ .StatefulSet.Namespace }}"
-          image: alpine:3.20
           command:
-            - sh
+            - bash
+            - -o
+            - errexit
+            - -o
+            - pipefail
             - -c
             - |
               set -euo pipefail
-              echo "validate artifact path={{ .ArtifactsIn.backupInfo.KeyValue.path }}"
-              echo "backupId={{ .ArtifactsIn.backupInfo.KeyValue.backupId }}"
-              test -n "{{ .ArtifactsIn.backupInfo.KeyValue.path }}"
-              test -n "{{ .ArtifactsIn.backupInfo.KeyValue.backupId }}"
+              BACKUP_LOCATION='{{ .ArtifactsIn.cloudObject.KeyValue.backupLocation }}'
+              echo "validating artifact ${BACKUP_LOCATION}"
+              kando location pull --profile '{{ toJson .Profile }}' --path "${BACKUP_LOCATION}" - \
+                | gzip -t
+              echo "gzip integrity ok"
+              # Sample first bytes after gunzip to ensure SQL dump, not empty/corrupt object
+              HEAD="$(kando location pull --profile '{{ toJson .Profile }}' --path "${BACKUP_LOCATION}" - | gunzip -c | head -c 64 | tr -d '\0' || true)"
+              echo "dump head: ${HEAD}"
+              echo "${HEAD}" | grep -Eqi 'postgres|create|drop|set |--'
               echo "validation ok"
 
   restore:
+    kind: StatefulSet
     inputArtifactNames:
-      - backupInfo
+      - cloudObject
     phases:
-      - func: KubeExec
-        name: restoreDump
+      - func: KubeTask
+        name: pgRestore
         objects:
-          postgresPod:
-            kind: Pod
-            name: "{{ index .StatefulSet.Pods 0 }}"
+          pgSecret:
+            kind: Secret
+            name: postgres-credentials
             namespace: "{{ .StatefulSet.Namespace }}"
         args:
+          image: ghcr.io/kanisterio/postgres-kanister-tools:0.118.0
           namespace: "{{ .StatefulSet.Namespace }}"
-          pod: "{{ index .StatefulSet.Pods 0 }}"
-          container: postgres
           command:
             - bash
             - -o
@@ -90,24 +101,46 @@ actions:
             - -c
             - |
               set -euo pipefail
-              echo "restoring backupId={{ .ArtifactsIn.backupInfo.KeyValue.backupId }}"
-              echo "source path={{ .ArtifactsIn.backupInfo.KeyValue.path }}"
-              # Drill environments restore into an isolated namespace created by scripts/restore-drill.sh
-              echo "restore phase ready — wire object-store fetch + psql apply for your Profile"
+              export PGHOST="postgres.{{ .StatefulSet.Namespace }}.svc.cluster.local"
+              export PGPORT="5432"
+              export PGUSER='{{ index .Phases.pgRestore.Secrets.pgSecret.Data "POSTGRES_USER" | toString }}'
+              export PGPASSWORD='{{ index .Phases.pgRestore.Secrets.pgSecret.Data "POSTGRES_PASSWORD" | toString }}'
+              export PGDATABASE='{{ index .Phases.pgRestore.Secrets.pgSecret.Data "POSTGRES_DB" | toString }}'
+              BACKUP_LOCATION='{{ .ArtifactsIn.cloudObject.KeyValue.backupLocation }}'
+              echo "restoring ${BACKUP_LOCATION} -> ${PGHOST}/${PGDATABASE}"
+              # Wait until Postgres accepts connections in the target namespace
+              for i in $(seq 1 60); do
+                if pg_isready -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}"; then
+                  break
+                fi
+                sleep 2
+              done
+              pg_isready -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}"
+              kando location pull --profile '{{ toJson .Profile }}' --path "${BACKUP_LOCATION}" - \
+                | gunzip -c -f \
+                | psql -v ON_ERROR_STOP=1 -h "${PGHOST}" -U "${PGUSER}" -d "${PGDATABASE}"
+              echo "restore complete"
 
   delete:
+    kind: StatefulSet
     inputArtifactNames:
-      - backupInfo
+      - cloudObject
     phases:
-      - func: KubeJob
-        name: deleteArtifact
+      - func: KubeTask
+        name: deleteDump
         args:
+          image: ghcr.io/kanisterio/postgres-kanister-tools:0.118.0
           namespace: "{{ .StatefulSet.Namespace }}"
-          image: alpine:3.20
           command:
-            - sh
+            - bash
+            - -o
+            - errexit
+            - -o
+            - pipefail
             - -c
             - |
               set -euo pipefail
-              echo "delete artifact path={{ .ArtifactsIn.backupInfo.KeyValue.path }}"
-              echo "retention cleanup queued"
+              BACKUP_LOCATION='{{ .ArtifactsIn.cloudObject.KeyValue.backupLocation }}'
+              echo "deleting ${BACKUP_LOCATION}"
+              kando location delete --profile '{{ toJson .Profile }}' --path "${BACKUP_LOCATION}"
+              echo "delete complete"

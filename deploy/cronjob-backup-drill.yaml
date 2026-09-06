@@ -1,0 +1,64 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kanister-backup-drill
+  namespace: kanister
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+    justrunme.com/role: scheduled-drill
+spec:
+  # Weekly Sunday 04:17 UTC — change for your platform calendar
+  schedule: "17 4 * * 0"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: default
+          containers:
+            - name: drill
+              image: bitnami/kubectl:1.30
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -euo pipefail
+                  TS="$(date -u +%Y%m%d%H%M%S)"
+                  NAME="scheduled-backup-${TS}"
+                  cat <<YAML | kubectl apply -f -
+                  apiVersion: cr.kanister.io/v1alpha1
+                  kind: ActionSet
+                  metadata:
+                    name: ${NAME}
+                    namespace: kanister
+                    labels:
+                      app.kubernetes.io/name: kanister-backup-restore
+                      justrunme.com/phase: backup
+                      justrunme.com/trigger: cron
+                  spec:
+                    actions:
+                      - name: backup
+                        blueprint: postgres-app-aware
+                        object:
+                          kind: StatefulSet
+                          name: postgres
+                          namespace: demo-postgres
+                        profile:
+                          name: minio-profile
+                          namespace: kanister
+                  YAML
+                  echo "created ${NAME}"
+                  for i in $(seq 1 72); do
+                    st="$(kubectl -n kanister get actionset/${NAME} -o jsonpath='{.status.state}' || true)"
+                    echo "state=${st:-pending}"
+                    case "${st}" in
+                      complete) exit 0 ;;
+                      failed) kubectl -n kanister describe actionset/${NAME}; exit 1 ;;
+                    esac
+                    sleep 5
+                  done
+                  exit 1

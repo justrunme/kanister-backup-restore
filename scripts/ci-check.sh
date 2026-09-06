@@ -3,55 +3,50 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-
 fail=0
 
-echo "== check required files =="
+echo "== required files =="
 for f in \
   README.md LICENSE Makefile \
   blueprints/postgres/blueprint.yaml \
   blueprints/generic-pvc/blueprint.yaml \
-  profiles/s3-profile.example.yaml \
+  deploy/minio-profile.yaml \
+  deploy/cronjob-backup-drill.yaml \
   examples/postgres-statefulset.yaml \
-  scripts/backup-drill.sh \
-  scripts/validate-backup.sh \
-  scripts/restore-drill.sh
+  scripts/run-action.sh \
+  scripts/full-drill.sh \
+  scripts/collect-evidence.sh
 do
-  if [[ ! -f "$f" ]]; then
-    echo "missing $f" >&2
-    fail=1
-  fi
+  [[ -f "$f" ]] || { echo "missing $f" >&2; fail=1; }
 done
 
-echo "== yaml structure (apiVersion/kind) =="
+echo "== yaml skeletons =="
 while IFS= read -r -d '' f; do
-  if ! grep -q 'apiVersion:' "$f" || ! grep -q 'kind:' "$f"; then
-    echo "invalid yaml skeleton: $f" >&2
-    fail=1
-  fi
-done < <(find blueprints profiles examples deploy -name '*.yaml' -print0)
+  grep -q 'apiVersion:' "$f" && grep -q 'kind:' "$f" || { echo "bad yaml $f" >&2; fail=1; }
+done < <(find blueprints deploy examples -name '*.yaml' -print0)
 
-echo "== scripts executable bit / shebang =="
-for s in scripts/*.sh; do
-  if ! head -1 "$s" | grep -q '^#!'; then
-    echo "missing shebang: $s" >&2
-    fail=1
-  fi
-done
+echo "== postgres blueprint uses kando =="
+grep -q 'kando location push' blueprints/postgres/blueprint.yaml || { echo "missing kando push" >&2; fail=1; }
+grep -q 'kando location pull' blueprints/postgres/blueprint.yaml || { echo "missing kando pull" >&2; fail=1; }
+grep -q 'gzip -t' blueprints/postgres/blueprint.yaml || { echo "missing gzip validate" >&2; fail=1; }
 
-echo "== blueprint actions present =="
+echo "== blueprint actions =="
 for bp in blueprints/*/blueprint.yaml; do
   for action in backup validate restore delete; do
-    if ! grep -q "^  ${action}:" "$bp"; then
-      echo "blueprint $bp missing action '$action'" >&2
-      fail=1
-    fi
+    grep -q "^  ${action}:" "$bp" || { echo "$bp missing $action" >&2; fail=1; }
   done
 done
 
+echo "== scripts shebang =="
+for s in scripts/*.sh; do
+  head -1 "$s" | grep -q '^#!' || { echo "no shebang $s" >&2; fail=1; }
+done
+
+echo "== tools image pinned =="
+grep -q 'postgres-kanister-tools:0.118.0' blueprints/postgres/blueprint.yaml || fail=1
+
 if [[ "$fail" -ne 0 ]]; then
-  echo "ci checks failed" >&2
+  echo "ci failed" >&2
   exit 1
 fi
-
 echo "ci checks passed"

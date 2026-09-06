@@ -1,0 +1,153 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kanister
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+    justrunme.com/role: recovery-plane
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-creds
+  namespace: kanister
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+type: Opaque
+stringData:
+  access_key: minio
+  secret_key: minio12345
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: kanister
+  labels:
+    app: minio
+    app.kubernetes.io/name: kanister-backup-restore
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+          args: ["server", "/data", "--console-address", ":9001"]
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-creds
+                  key: access_key
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-creds
+                  key: secret_key
+          ports:
+            - containerPort: 9000
+              name: s3
+            - containerPort: 9001
+              name: console
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: kanister
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-bootstrap-bucket
+  namespace: kanister
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+spec:
+  ttlSecondsAfterFinished: 120
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:RELEASE.2024-11-17T19-35-46Z
+          env:
+            - name: MC_HOST_local
+              value: http://$(ACCESS_KEY):$(SECRET_KEY)@minio.kanister.svc.cluster.local:9000
+            - name: ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-creds
+                  key: access_key
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-creds
+                  key: secret_key
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -euo pipefail
+              export MC_HOST_local="http://${ACCESS_KEY}:${SECRET_KEY}@minio.kanister.svc.cluster.local:9000"
+              for i in $(seq 1 60); do
+                mc ready local && break
+                sleep 2
+              done
+              mc mb --ignore-existing local/kanister-drills
+              mc ls local/kanister-drills
+              echo "bucket kanister-drills ready"
+---
+apiVersion: cr.kanister.io/v1alpha1
+kind: Profile
+metadata:
+  name: minio-profile
+  namespace: kanister
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+location:
+  type: s3Compliant
+  bucket: kanister-drills
+  endpoint: http://minio.kanister.svc.cluster.local:9000
+  prefix: drills/
+  region: us-east-1
+credential:
+  type: keyPair
+  keyPair:
+    idField: access_key
+    secretField: secret_key
+    secret:
+      apiVersion: v1
+      kind: Secret
+      name: minio-creds
+      namespace: kanister
+skipSSLVerify: true

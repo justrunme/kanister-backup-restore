@@ -1,13 +1,12 @@
-# Example Kanister Profile for S3-compatible object storage.
-# Copy to s3-profile.yaml and fill secrets before `make apply-profile`.
+# Example cloud Profile (AWS S3 / GCS interoperable endpoint).
+# For Kind drills prefer deploy/minio-profile.yaml (applied by `make minio`).
 apiVersion: v1
 kind: Secret
 metadata:
-  name: kanister-s3-secret
+  name: s3-creds
   namespace: kanister
 type: Opaque
 stringData:
-  # aws access key id / secret for S3 or MinIO
   access_key: "CHANGE_ME"
   secret_key: "CHANGE_ME"
 ---
@@ -16,14 +15,12 @@ kind: Profile
 metadata:
   name: s3-profile
   namespace: kanister
-  labels:
-    app.kubernetes.io/name: kanister-backup-restore
 location:
   type: s3Compliant
-  bucket: kanister-drills
-  endpoint: ""   # e.g. http://minio.kanister.svc:9000 for in-cluster MinIO
-  prefix: drills/
-  region: us-east-1
+  bucket: your-kanister-bucket
+  endpoint: "" # leave empty for AWS; set for MinIO/GCS XML API
+  prefix: production/
+  region: eu-central-1
 credential:
   type: keyPair
   keyPair:
@@ -32,6 +29,6 @@ credential:
     secret:
       apiVersion: v1
       kind: Secret
-      name: kanister-s3-secret
+      name: s3-creds
       namespace: kanister
-skipSSLVerify: true
+skipSSLVerify: false

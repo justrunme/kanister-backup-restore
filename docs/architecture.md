@@ -1,39 +1,35 @@
 # Architecture
 
-Kanister Backup & Restore treats recovery as a **control loop**, not a script on a laptop.
+Kanister Backup & Restore treats recovery as a **control loop**.
 
 ```text
-Workload → Blueprint → ActionSet → Object store → Validate → Restore drill → Audit
+Workload → Blueprint → ActionSet → Object store (Profile) → Validate → Restore drill → Evidence
 ```
 
-## Components
+## Control plane pieces
 
-| Piece | Responsibility |
+| Piece | Role |
 |---|---|
-| **Blueprint** | Declares backup / validate / restore / delete actions and application order |
-| **Profile** | Object-store location + credentials (S3-compatible) |
-| **ActionSet** | One execution of an action against a concrete object (StatefulSet, Deployment, …) |
-| **Drill namespace** | Isolated restore target so production stays untouched |
-| **Validation** | Proves the artifact is usable before operators trust it |
+| **Blueprint** | Declares backup / validate / restore / delete with application semantics |
+| **Profile** | S3-compatible location + credentials (MinIO in Kind drills) |
+| **ActionSet** | One execution against a concrete object (StatefulSet / Deployment) |
+| **kando** | Streams artifacts to/from the Profile (`location push/pull/delete`) |
+| **Drill namespace** | Isolated restore target (`restore-drill-*`) |
+| **Evidence** | Markdown snapshot of ActionSets + artifact path |
 
-## Why not “just VolumeSnapshots”?
+## Postgres path (default drill)
 
-Snapshots are necessary but not sufficient:
+1. Seed table `recovery_markers` in `demo-postgres`
+2. `pg_dump --clean --if-exists | gzip | kando location push`
+3. Validate with `gzip -t` + SQL head sniff
+4. Restore into a new namespace with the same Secret/Service contract
+5. Query `recovery_markers` to prove data returned
 
-- application consistency (logical dump vs dirty pages)
-- secret / config reconstitution
-- restore ordering across services
-- operator-visible status and audit
-- scheduled drills while the platform is calm
+## Failure philosophy
 
-## Evidence
+Validation failures are **hard failures**.  
+A backup that cannot be pulled and inspected is not a backup.
 
-A successful drill leaves:
+## Case study
 
-1. Blueprint + Profile applied  
-2. ActionSet `complete` for backup  
-3. Validation script exit `0`  
-4. Restore ActionSet into `restore-drill-*`  
-5. Short note of who ran it and when (CI log or ticket)
-
-Case study: https://justrunme.com/cases/kanister-backup-restore/
+https://justrunme.com/cases/kanister-backup-restore/

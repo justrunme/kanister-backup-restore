@@ -11,6 +11,8 @@ kind: Secret
 metadata:
   name: postgres-credentials
   namespace: demo-postgres
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
 type: Opaque
 stringData:
   POSTGRES_USER: postgres
@@ -18,10 +20,29 @@ stringData:
   POSTGRES_DB: app
 ---
 apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-seed
+  namespace: demo-postgres
+data:
+  seed.sql: |
+    CREATE TABLE IF NOT EXISTS recovery_markers (
+      id SERIAL PRIMARY KEY,
+      note TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    INSERT INTO recovery_markers (note)
+    VALUES ('kanister-drill-seed-' || to_char(now() AT TIME ZONE 'UTC', 'YYYYMMDD"T"HH24MISS'));
+---
+apiVersion: v1
 kind: Service
 metadata:
   name: postgres
   namespace: demo-postgres
+  labels:
+    app: postgres
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: demo-postgres
 spec:
   selector:
     app: postgres
@@ -37,7 +58,9 @@ metadata:
   namespace: demo-postgres
   labels:
     app: postgres
-    app.kubernetes.io/name: kanister-backup-restore
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: demo-postgres
+    app.kubernetes.io/part-of: kanister-backup-restore
 spec:
   serviceName: postgres
   replicas: 1
@@ -48,6 +71,8 @@ spec:
     metadata:
       labels:
         app: postgres
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/instance: demo-postgres
     spec:
       containers:
         - name: postgres
@@ -66,6 +91,11 @@ spec:
               command: ["pg_isready", "-U", "postgres"]
             initialDelaySeconds: 5
             periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -74,3 +104,43 @@ spec:
         resources:
           requests:
             storage: 2Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: postgres-seed
+  namespace: demo-postgres
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+spec:
+  ttlSecondsAfterFinished: 120
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: seed
+          image: postgres:16-alpine
+          envFrom:
+            - secretRef:
+                name: postgres-credentials
+          env:
+            - name: PGHOST
+              value: postgres.demo-postgres.svc.cluster.local
+          volumeMounts:
+            - name: seed
+              mountPath: /seed
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -euo pipefail
+              for i in $(seq 1 60); do
+                pg_isready -h "$PGHOST" -U "$POSTGRES_USER" && break
+                sleep 2
+              done
+              psql -h "$PGHOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /seed/seed.sql
+              psql -h "$PGHOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'SELECT id, note, created_at FROM recovery_markers ORDER BY id DESC LIMIT 5;'
+      volumes:
+        - name: seed
+          configMap:
+            name: postgres-seed
