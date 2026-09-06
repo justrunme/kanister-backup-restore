@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 560" role="img" aria-labelledby="title desc">
   <title id="title">Recovery Contract lifecycle</title>
-  <desc id="desc">PROTECT, VALIDATE, RESTORE, PROVE  binary Recovery Contract with live drill evidence.</desc>
+  <desc id="desc">PROTECT, VALIDATE, RESTORE, PROVE - binary Recovery Contract with live drill evidence.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#0a1020"/>
@@ -10,10 +10,6 @@
     <linearGradient id="accentG" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0%" stop-color="#2dd4bf"/>
       <stop offset="100%" stop-color="#38bdf8"/>
-    </linearGradient>
-    <linearGradient id="prove" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#052e1c"/>
-      <stop offset="100%" stop-color="#0b3d2e"/>
     </linearGradient>
     <filter id="soft" x="-10%" y="-10%" width="120%" height="120%">
       <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000" flood-opacity="0.35"/>
@@ -40,15 +36,14 @@
 
   <rect width="1120" height="560" fill="url(#bg)"/>
   <text x="40" y="42" class="title">Recovery Contract</text>
-  <text x="40" y="66" class="sub">A backup is successful when recovery has been proved  not when the artifact was written</text>
-  <rect x="40" y="80" width="260" height="22" rx="11" fill="url(#accentG)"/>
-  <text x="170" y="95" text-anchor="middle" class="chip">PROTECT ’ VALIDATE ’ RESTORE ’ PROVE</text>
+  <text x="40" y="66" class="sub">A backup is successful when recovery has been proved - not when the artifact was written</text>
+  <rect x="40" y="80" width="300" height="22" rx="11" fill="url(#accentG)"/>
+  <text x="190" y="95" text-anchor="middle" class="chip">PROTECT - VALIDATE - RESTORE - PROVE</text>
 
-  <!-- Stages -->
   <g filter="url(#soft)">
     <rect class="box" x="40" y="140" width="200" height="120" rx="14"/>
     <text x="140" y="178" text-anchor="middle" class="stage">PROTECT</text>
-    <text x="140" y="208" text-anchor="middle" class="metric">pg_dump · kando push</text>
+    <text x="140" y="208" text-anchor="middle" class="metric">pg_dump / kando push</text>
     <text x="140" y="230" text-anchor="middle" class="metric">ActionSet complete</text>
   </g>
   <path class="flow" d="M250 200 H290"/>
@@ -65,7 +60,7 @@
     <rect class="box" x="560" y="140" width="200" height="120" rx="14"/>
     <text x="660" y="178" text-anchor="middle" class="stage">RESTORE</text>
     <text x="660" y="208" text-anchor="middle" class="metric">isolated namespace</text>
-    <text x="660" y="230" text-anchor="middle" class="metric">kando pull · apply</text>
+    <text x="660" y="230" text-anchor="middle" class="metric">kando pull / apply</text>
   </g>
   <path class="flow" d="M770 200 H810"/>
 
@@ -76,7 +71,6 @@
     <text x="950" y="230" text-anchor="middle" class="verdict" style="font-size:14px">PROVED</text>
   </g>
 
-  <!-- Evidence card -->
   <g filter="url(#soft)" transform="translate(40 300)">
     <rect x="0" y="0" width="520" height="220" rx="16" fill="#0f1a2d" stroke="#334155" stroke-width="1.5"/>
     <text x="24" y="32" class="card-t">RECOVERY DRILL #0042</text>
@@ -88,7 +82,7 @@
     <text x="24" y="124" class="row">Isolated restore</text><text x="480" y="124" text-anchor="end" class="row pass">PASS</text>
     <text x="24" y="152" class="row">Application ready</text><text x="480" y="152" text-anchor="end" class="row pass">PASS</text>
     <text x="24" y="180" class="row">Recovery marker</text><text x="480" y="180" text-anchor="end" class="row pass">PASS</text>
-    <text x="24" y="208" class="verdict" style="font-size:13px">Ï RECOVERY PROVED</text>
+    <text x="24" y="208" class="verdict" style="font-size:13px">RECOVERY PROVED</text>
   </g>
 
   <g filter="url(#soft)" transform="translate(580 300)">
@@ -97,8 +91,8 @@
     <text x="24" y="72" class="row">Artifact integrity</text><text x="460" y="72" text-anchor="end" class="metric">required</text>
     <text x="24" y="100" class="row">Isolated restore</text><text x="460" y="100" text-anchor="end" class="metric">required</text>
     <text x="24" y="128" class="row">Data verification</text><text x="460" y="128" text-anchor="end" class="metric">required</text>
-    <text x="24" y="156" class="row">RTO</text><text x="460" y="156" text-anchor="end" class="metric">&lt; 60s · observed 38s</text>
-    <text x="24" y="184" class="row">Evidence freshness</text><text x="460" y="184" text-anchor="end" class="metric">&lt; 24h · 0m</text>
-    <text x="24" y="208" class="tiny">BINARY VERDICT · NO PERCENTAGE SCORE</text>
+    <text x="24" y="156" class="row">RTO</text><text x="460" y="156" text-anchor="end" class="metric">&lt; 60s / observed 38s</text>
+    <text x="24" y="184" class="row">Evidence freshness</text><text x="460" y="184" text-anchor="end" class="metric">&lt; 24h / 0m</text>
+    <text x="24" y="208" class="tiny">BINARY VERDICT - NO PERCENTAGE SCORE</text>
   </g>
 </svg>
