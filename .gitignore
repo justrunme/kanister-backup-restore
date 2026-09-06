@@ -1,0 +1,12 @@
+.DS_Store
+*.swp
+.env
+.env.*
+!.env.example
+/tmp/
+/bin/
+/dist/
+*.log
+.idea/
+.vscode/
+kind-config.yaml.bak

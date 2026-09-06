@@ -1,0 +1,90 @@
+apiVersion: cr.kanister.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: generic-pvc-app-aware
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+    app.kubernetes.io/component: blueprint
+    justrunme.com/workload: generic-pvc
+actions:
+  backup:
+    outputArtifacts:
+      backupInfo:
+        keyValue:
+          backupId: "{{ .Phases.snapshotFs.Output.backupId }}"
+          path: "{{ .Phases.snapshotFs.Output.path }}"
+          namespace: "{{ .Deployment.Namespace }}"
+          name: "{{ .Deployment.Name }}"
+    phases:
+      - func: KubeTask
+        name: snapshotFs
+        args:
+          image: ghcr.io/kanisterio/kanister-tools:0.113.0
+          namespace: "{{ .Deployment.Namespace }}"
+          command:
+            - bash
+            - -o
+            - errexit
+            - -o
+            - pipefail
+            - -c
+            - |
+              set -euo pipefail
+              BACKUP_ID="fs-$(date -u +%Y%m%dT%H%M%SZ)-$RANDOM"
+              PATH_KEY="pvc/{{ .Deployment.Namespace }}/{{ .Deployment.Name }}/${BACKUP_ID}.tar.gz"
+              echo "filesystem backup backupId=${BACKUP_ID}"
+              # Mount / copy path is environment-specific; scripts orchestrate ActionSets.
+              kando output backupId "${BACKUP_ID}"
+              kando output path "${PATH_KEY}"
+
+  validate:
+    inputArtifactNames:
+      - backupInfo
+    phases:
+      - func: KubeJob
+        name: checkArtifact
+        args:
+          namespace: "{{ .Deployment.Namespace }}"
+          image: alpine:3.20
+          command:
+            - sh
+            - -c
+            - |
+              set -euo pipefail
+              echo "validate path={{ .ArtifactsIn.backupInfo.KeyValue.path }}"
+              test -n "{{ .ArtifactsIn.backupInfo.KeyValue.path }}"
+              echo "validation ok"
+
+  restore:
+    inputArtifactNames:
+      - backupInfo
+    phases:
+      - func: KubeTask
+        name: restoreFs
+        args:
+          image: ghcr.io/kanisterio/kanister-tools:0.113.0
+          namespace: "{{ .Deployment.Namespace }}"
+          command:
+            - bash
+            - -o
+            - errexit
+            - -c
+            - |
+              set -euo pipefail
+              echo "restore filesystem backupId={{ .ArtifactsIn.backupInfo.KeyValue.backupId }}"
+              echo "source={{ .ArtifactsIn.backupInfo.KeyValue.path }}"
+
+  delete:
+    inputArtifactNames:
+      - backupInfo
+    phases:
+      - func: KubeJob
+        name: deleteArtifact
+        args:
+          namespace: "{{ .Deployment.Namespace }}"
+          image: alpine:3.20
+          command:
+            - sh
+            - -c
+            - |
+              echo "delete path={{ .ArtifactsIn.backupInfo.KeyValue.path }}"

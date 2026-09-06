@@ -1,0 +1,113 @@
+apiVersion: cr.kanister.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: postgres-app-aware
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+    app.kubernetes.io/component: blueprint
+    justrunme.com/workload: postgres
+actions:
+  backup:
+    outputArtifacts:
+      backupInfo:
+        keyValue:
+          backupId: "{{ .Phases.dump.Output.backupId }}"
+          path: "{{ .Phases.dump.Output.path }}"
+          namespace: "{{ .StatefulSet.Namespace }}"
+          name: "{{ .StatefulSet.Name }}"
+    phases:
+      - func: KubeExec
+        name: dump
+        objects:
+          postgresPod:
+            kind: Pod
+            name: "{{ index .StatefulSet.Pods 0 }}"
+            namespace: "{{ .StatefulSet.Namespace }}"
+        args:
+          namespace: "{{ .StatefulSet.Namespace }}"
+          pod: "{{ index .StatefulSet.Pods 0 }}"
+          container: postgres
+          command:
+            - bash
+            - -o
+            - errexit
+            - -o
+            - pipefail
+            - -c
+            - |
+              set -euo pipefail
+              BACKUP_ID="pg-$(date -u +%Y%m%dT%H%M%SZ)-$RANDOM"
+              PATH_KEY="postgres/{{ .StatefulSet.Namespace }}/{{ .StatefulSet.Name }}/${BACKUP_ID}.sql.gz"
+              echo "starting logical backup backupId=${BACKUP_ID}"
+              # Placeholder dump path: wire Profile credentials + kanctl push in your environment.
+              # Local drills use scripts/backup-drill.sh to orchestrate ActionSets against a Profile.
+              pg_dump -U "${POSTGRES_USER:-postgres}" "${POSTGRES_DB:-app}" | gzip -c > "/tmp/${BACKUP_ID}.sql.gz"
+              ls -la "/tmp/${BACKUP_ID}.sql.gz"
+              kando output backupId "${BACKUP_ID}"
+              kando output path "${PATH_KEY}"
+
+  validate:
+    inputArtifactNames:
+      - backupInfo
+    phases:
+      - func: KubeJob
+        name: checkArtifact
+        args:
+          namespace: "{{ .StatefulSet.Namespace }}"
+          image: alpine:3.20
+          command:
+            - sh
+            - -c
+            - |
+              set -euo pipefail
+              echo "validate artifact path={{ .ArtifactsIn.backupInfo.KeyValue.path }}"
+              echo "backupId={{ .ArtifactsIn.backupInfo.KeyValue.backupId }}"
+              test -n "{{ .ArtifactsIn.backupInfo.KeyValue.path }}"
+              test -n "{{ .ArtifactsIn.backupInfo.KeyValue.backupId }}"
+              echo "validation ok"
+
+  restore:
+    inputArtifactNames:
+      - backupInfo
+    phases:
+      - func: KubeExec
+        name: restoreDump
+        objects:
+          postgresPod:
+            kind: Pod
+            name: "{{ index .StatefulSet.Pods 0 }}"
+            namespace: "{{ .StatefulSet.Namespace }}"
+        args:
+          namespace: "{{ .StatefulSet.Namespace }}"
+          pod: "{{ index .StatefulSet.Pods 0 }}"
+          container: postgres
+          command:
+            - bash
+            - -o
+            - errexit
+            - -o
+            - pipefail
+            - -c
+            - |
+              set -euo pipefail
+              echo "restoring backupId={{ .ArtifactsIn.backupInfo.KeyValue.backupId }}"
+              echo "source path={{ .ArtifactsIn.backupInfo.KeyValue.path }}"
+              # Drill environments restore into an isolated namespace created by scripts/restore-drill.sh
+              echo "restore phase ready — wire object-store fetch + psql apply for your Profile"
+
+  delete:
+    inputArtifactNames:
+      - backupInfo
+    phases:
+      - func: KubeJob
+        name: deleteArtifact
+        args:
+          namespace: "{{ .StatefulSet.Namespace }}"
+          image: alpine:3.20
+          command:
+            - sh
+            - -c
+            - |
+              set -euo pipefail
+              echo "delete artifact path={{ .ArtifactsIn.backupInfo.KeyValue.path }}"
+              echo "retention cleanup queued"

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kanister
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+    justrunme.com/role: recovery-plane
