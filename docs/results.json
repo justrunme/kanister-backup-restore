@@ -1,0 +1,25 @@
+{
+  "repo": "kanister-backup-restore",
+  "source_run": "https://github.com/justrunme/kanister-backup-restore/actions/runs/38061727612",
+  "measured_at": "2026-10-10T15:01:01Z",
+  "metrics": {
+    "happy_path": {
+      "k8s_v1.37.0": {
+        "rto_seconds": 16,
+        "rpo_seconds": 26,
+        "verdict": "PROVED"
+      },
+      "k8s_v1.36.4": {
+        "rto_seconds": 16,
+        "rpo_seconds": 25,
+        "verdict": "PROVED"
+      }
+    },
+    "failure_corrupt_artifact": {
+      "verdict": "UNPROVED",
+      "reason": "artifact_integrity",
+      "blocked_at": "validate"
+    },
+    "rto_seconds_max": 60
+  }
+}
