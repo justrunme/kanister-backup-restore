@@ -11,3 +11,4 @@
 .vscode/
 .evidence/
 kind-config.yaml.bak
+shellcheck-*/

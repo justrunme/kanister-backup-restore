@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROFILE_NS="${PROFILE_NS:-kanister}"
-PROFILE_NAME="${PROFILE_NAME:-minio-profile}"
+PROFILE_NAME="${PROFILE_NAME:-s3-profile}"
 EVIDENCE_DIR="${EVIDENCE_DIR:-$ROOT/.evidence}"
 STATE_FILE="$EVIDENCE_DIR/active-break.env"
 SEQ_FILE="$EVIDENCE_DIR/drill-seq"
@@ -36,9 +36,9 @@ now_epoch() { date -u +%s; }
 
 DRILL_ID=1
 if [[ -f "$SEQ_FILE" ]]; then
-  DRILL_ID=$(( $(cat "$SEQ_FILE") + 1 ))
+  DRILL_ID=$(($(cat "$SEQ_FILE") + 1))
 fi
-echo "$DRILL_ID" > "$SEQ_FILE"
+echo "$DRILL_ID" >"$SEQ_FILE"
 
 echo "== Recovery Contract drill #${DRILL_ID} · scenario=${SCENARIO} =="
 echo "== PROTECT → VALIDATE → RESTORE → PROVE =="
@@ -130,7 +130,7 @@ if [[ -n "$BACKUP_CREATED" ]]; then
     BACKUP_EPOCH=$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "${BACKUP_CREATED}" +%s 2>/dev/null || true)
   fi
   if [[ -n "${BACKUP_EPOCH:-}" ]]; then
-    RPO_SECONDS=$(( $(now_epoch) - BACKUP_EPOCH ))
+    RPO_SECONDS=$(($(now_epoch) - BACKUP_EPOCH))
   fi
 fi
 echo "-- protect: backup=${BACKUP_AS} ($([[ $checks_backup == true ]] && echo PASS || echo FAIL))"
@@ -166,9 +166,12 @@ RESTORE_AS="restore-postgres-$(date -u +%Y%m%d%H%M%S)"
 echo "-- restore into ${DRILL_NS}"
 
 START=$(now_epoch)
-sed "s/name: demo-postgres/name: ${DRILL_NS}/g" "$ROOT/examples/postgres-statefulset.yaml" \
-  | sed "s/postgres-seed/postgres-seed-${DRILL_NS}/g" \
-  | kubectl apply -f -
+sed -e "s/name: demo-postgres/name: ${DRILL_NS}/g" \
+  -e "s/namespace: demo-postgres/namespace: ${DRILL_NS}/g" \
+  -e "s/postgres-seed/postgres-seed-${DRILL_NS}/g" \
+  "$ROOT/examples/postgres-statefulset.yaml" | kubectl apply -f -
+# The seed Job races pg_restore (--clean). Initdb already applied seed.sql.
+kubectl -n "$DRILL_NS" delete job "postgres-seed-${DRILL_NS}" --ignore-not-found
 kubectl -n "$DRILL_NS" rollout status statefulset/postgres --timeout=180s
 
 if [[ "$SCENARIO" == "wrong-secret" ]]; then
@@ -218,7 +221,10 @@ RESTORE_OK=false
 for _ in $(seq 1 90); do
   st="$(kubectl -n "$PROFILE_NS" get "actionset/${RESTORE_AS}" -o jsonpath='{.status.state}' 2>/dev/null || true)"
   case "$st" in
-    complete) RESTORE_OK=true; break ;;
+    complete)
+      RESTORE_OK=true
+      break
+      ;;
     failed) break ;;
   esac
   sleep 5
@@ -232,6 +238,12 @@ if [[ "$RESTORE_OK" == true ]]; then
 else
   BLOCKED_AT="${BLOCKED_AT:-restore}"
   echo "   isolated_restore FAIL"
+  kubectl -n "$PROFILE_NS" describe "actionset/${RESTORE_AS}" >&2 || true
+  kubectl get pods -A | grep -E 'kanister-job|NAME' >&2 || true
+  for p in $(kubectl -n "$DRILL_NS" get pods -o name 2>/dev/null | grep kanister-job || true); do
+    echo "=== logs ${DRILL_NS}/${p} ===" >&2
+    kubectl -n "$DRILL_NS" logs "$p" --tail=80 >&2 || true
+  done
 fi
 
 # --- PROVE ---
@@ -251,7 +263,7 @@ if [[ "$checks_restore" == true ]]; then
   fi
 
   if kubectl -n "$DRILL_NS" exec sts/postgres -- \
-      psql -U postgres -d app -tAc "SELECT COUNT(*) FROM recovery_markers" 2>/dev/null | grep -Eq '^[1-9]'; then
+    psql -U postgres -d app -tAc "SELECT COUNT(*) FROM recovery_markers" 2>/dev/null | grep -Eq '^[1-9]'; then
     checks_data=true
     echo "   data_verification PASS"
   else

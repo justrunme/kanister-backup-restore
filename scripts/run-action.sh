@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROFILE_NS="${PROFILE_NS:-kanister}"
-PROFILE_NAME="${PROFILE_NAME:-minio-profile}"
+PROFILE_NAME="${PROFILE_NAME:-s3-profile}"
 NS="${DEMO_NAMESPACE:-demo-postgres}"
 NAME="${DEMO_STATEFULSET:-postgres}"
 BLUEPRINT="${BLUEPRINT:-postgres-app-aware}"
@@ -31,7 +31,13 @@ wait_actionset() {
 
 kubectl apply -f "$ROOT/examples/postgres-statefulset.yaml"
 kubectl -n "$NS" rollout status "statefulset/${NAME}" --timeout=180s
-kubectl -n "$NS" wait --for=condition=complete job/postgres-seed --timeout=180s || true
+if kubectl -n "$NS" get job/postgres-seed >/dev/null 2>&1; then
+  kubectl -n "$NS" wait --for=condition=complete job/postgres-seed --timeout=180s || {
+    echo "postgres-seed job did not complete; dumping logs" >&2
+    kubectl -n "$NS" logs job/postgres-seed --tail=80 >&2 || true
+    kubectl -n "$NS" describe job/postgres-seed >&2 || true
+  }
+fi
 
 ARTIFACTS_BLOCK=""
 if [[ "$ACTION" == "validate" || "$ACTION" == "restore" ]]; then
@@ -54,7 +60,8 @@ if [[ "$ACTION" == "validate" || "$ACTION" == "restore" ]]; then
     exit 1
   fi
   echo "using artifacts from ${FROM}: ${LOC}"
-  ARTIFACTS_BLOCK=$(cat <<EOF
+  ARTIFACTS_BLOCK=$(
+    cat <<EOF
       artifacts:
         cloudObject:
           keyValue:
@@ -62,7 +69,7 @@ if [[ "$ACTION" == "validate" || "$ACTION" == "restore" ]]; then
             namespace: "${NS}"
             name: "${NAME}"
 EOF
-)
+  )
 fi
 
 cat <<YAML | kubectl apply -f -

@@ -11,7 +11,7 @@ OUT_DIR="${EVIDENCE_DIR:-$ROOT/.evidence}"
 mkdir -p "$OUT_DIR"
 
 if [[ -z "$IN" ]]; then
-  IN="$(ls -1t "$OUT_DIR"/drill-*.json 2>/dev/null | head -1 || true)"
+  IN="$(find "$OUT_DIR" -name 'drill-*.json' -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2- || true)"
 fi
 if [[ -z "$IN" || ! -f "$IN" ]]; then
   echo "No evidence JSON found. Run a drill first (make recovery-drill)." >&2

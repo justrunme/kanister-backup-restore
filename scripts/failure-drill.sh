@@ -14,8 +14,8 @@ else
 fi
 
 case "$SCENARIO" in
-  corrupt-artifact|wrong-secret|schema-drift|slow-restore) ;;
-  ""|help|-h|--help)
+  corrupt-artifact | wrong-secret | schema-drift | slow-restore) ;;
+  "" | help | -h | --help)
     cat <<EOF
 Usage: make failure-drill SCENARIO=<name>
 

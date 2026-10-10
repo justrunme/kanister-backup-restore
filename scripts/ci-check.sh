@@ -11,9 +11,11 @@ for f in \
   docs/assets/recovery-lifecycle.svg \
   blueprints/postgres/blueprint.yaml \
   scripts/recovery-drill.sh scripts/break.sh scripts/evaluate-contract.sh scripts/failure-drill.sh \
-  deploy/minio-profile.yaml examples/postgres-statefulset.yaml
-do
-  [[ -f "$f" ]] || { echo "missing $f" >&2; fail=1; }
+  deploy/seaweedfs-profile.yaml examples/postgres-statefulset.yaml; do
+  [[ -f "$f" ]] || {
+    echo "missing $f" >&2
+    fail=1
+  }
 done
 
 echo "== concept markers =="
@@ -22,7 +24,10 @@ grep -q 'PROTECT → VALIDATE → RESTORE → PROVE' README.md || fail=1
 grep -q 'Restore should be proved, not assumed' README.md || fail=1
 grep -q 'PROVED' README.md || fail=1
 grep -q 'UNPROVED' README.md || fail=1
-! grep -q 'Confidence.*100' README.md || { echo "percentage score still in README" >&2; fail=1; }
+! grep -q 'Confidence.*100' README.md || {
+  echo "percentage score still in README" >&2
+  fail=1
+}
 
 echo "== contract schema =="
 python3 - <<'PY' || fail=1
@@ -93,7 +98,10 @@ rm -rf .evidence-ci
 
 echo "== failure scenarios =="
 for s in corrupt-artifact wrong-secret schema-drift slow-restore; do
-  grep -q "$s" scripts/break.sh || { echo "missing scenario $s" >&2; fail=1; }
+  grep -q "$s" scripts/break.sh || {
+    echo "missing scenario $s" >&2
+    fail=1
+  }
 done
 grep -q 'failure-drill' Makefile || fail=1
 
@@ -101,8 +109,14 @@ echo "== kando still present =="
 grep -q 'kando location push' blueprints/postgres/blueprint.yaml || fail=1
 
 # stale score files must be gone
-[[ ! -f config/recovery-slo.json ]] || { echo "stale recovery-slo.json" >&2; fail=1; }
-[[ ! -f scripts/compute-confidence.sh ]] || { echo "stale compute-confidence.sh" >&2; fail=1; }
+[[ ! -f config/recovery-slo.json ]] || {
+  echo "stale recovery-slo.json" >&2
+  fail=1
+}
+[[ ! -f scripts/compute-confidence.sh ]] || {
+  echo "stale compute-confidence.sh" >&2
+  fail=1
+}
 
 if [[ "$fail" -ne 0 ]]; then
   echo "ci failed" >&2

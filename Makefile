@@ -38,9 +38,11 @@ restore-drill: ## RESTORE — isolated namespace
 recovery-drill: ## PROTECT → VALIDATE → RESTORE → PROVE
 	chmod +x scripts/*.sh
 	./scripts/recovery-drill.sh
+	./scripts/export-metrics.sh
 
 prove: ## Re-evaluate latest evidence against Recovery Contract
 	./scripts/evaluate-contract.sh
+	./scripts/export-metrics.sh
 
 full-drill: ## Kind bring-up + happy-path Recovery Contract drill
 	chmod +x scripts/*.sh
@@ -59,9 +61,23 @@ failure-drill: ## Inject failure then prove UNPROVED (SCENARIO=corrupt-artifact|
 evidence: ## Collect ActionSet evidence markdown
 	./scripts/collect-evidence.sh
 
+export-metrics: ## Export Prometheus metrics from latest evidence
+	./scripts/export-metrics.sh
+
 cron: ## Install weekly backup CronJob
 	kubectl apply -f deploy/cronjob-backup-drill.yaml
+
+prometheus-rules: ## Install PrometheusRule for alerting
+	kubectl apply -f deploy/prometheus-rules.yaml
 
 ci: ## Offline repository checks
 	chmod +x scripts/*.sh
 	./scripts/ci-check.sh
+
+shellcheck: ## Run shellcheck on all scripts
+	@command -v shellcheck >/dev/null || { echo "shellcheck not installed" >&2; exit 1; }
+	find scripts -name "*.sh" -type f -print0 | xargs -0 shellcheck -e SC1091
+
+shfmt: ## Check shell formatting
+	@command -v shfmt >/dev/null || { echo "shfmt not installed" >&2; exit 1; }
+	shfmt -d -i 2 -ci -bn scripts/*.sh

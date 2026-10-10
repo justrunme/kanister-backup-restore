@@ -2,6 +2,7 @@ apiVersion: cr.kanister.io/v1alpha1
 kind: Blueprint
 metadata:
   name: postgres-app-aware
+  namespace: kanister
   labels:
     app.kubernetes.io/name: kanister-backup-restore
     app.kubernetes.io/component: blueprint
@@ -34,17 +35,24 @@ actions:
             - pipefail
             - -c
             - |
-              set -euo pipefail
+              set -euxo pipefail
+              export AWS_EC2_METADATA_DISABLED=true
               export PGHOST="postgres.{{ .StatefulSet.Namespace }}.svc.cluster.local"
               export PGPORT="5432"
               export PGUSER='{{ index .Phases.pgDump.Secrets.pgSecret.Data "POSTGRES_USER" | toString }}'
               export PGPASSWORD='{{ index .Phases.pgDump.Secrets.pgSecret.Data "POSTGRES_PASSWORD" | toString }}'
               export PGDATABASE='{{ index .Phases.pgDump.Secrets.pgSecret.Data "POSTGRES_DB" | toString }}'
-              BACKUP_LOCATION="pg_backups/{{ .StatefulSet.Namespace }}/{{ .StatefulSet.Name }}/{{ toDate "2006-01-02T15:04:05.999999999Z07:00" .Time | date "2006-01-02T15:04:05Z07:00" }}/backup.sql.gz"
-              echo "pg_dump host=${PGHOST} db=${PGDATABASE} -> ${BACKUP_LOCATION}"
-              pg_dump --clean --if-exists -U "${PGUSER}" "${PGDATABASE}" \
-                | gzip -c \
-                | kando location push --profile '{{ toJson .Profile }}' --path "${BACKUP_LOCATION}" -
+              BACKUP_LOCATION="pg_backups/{{ .StatefulSet.Namespace }}/{{ .StatefulSet.Name }}/backup.sql.gz"
+              PROFILE_JSON='{"Location":{"type":"s3Compliant","bucket":"kanister-drills","endpoint":"http://seaweedfs.kanister.svc.cluster.local:8333","prefix":"drills/","region":"us-east-1"},"Credential":{"Type":"keyPair","KeyPair":{"ID":"admin","Secret":"admin12345"}},"SkipSSLVerify":true}'
+              echo "START backup host=${PGHOST} db=${PGDATABASE} path=${BACKUP_LOCATION}"
+              pg_dump --clean --if-exists -U "${PGUSER}" "${PGDATABASE}" | gzip -c > /tmp/backup.sql.gz
+              echo "dump bytes=$(wc -c < /tmp/backup.sql.gz)"
+              if ! kando location push /tmp/backup.sql.gz --profile "${PROFILE_JSON}" --path "${BACKUP_LOCATION}" > /tmp/kando.out 2>&1; then
+                echo "kando push failed"
+                grep -iE 'error|fail|denied|unable|invalid|missing|forbidden|connect' /tmp/kando.out || tail -20 /tmp/kando.out
+                exit 1
+              fi
+              cat /tmp/kando.out
               kando output backupLocation "${BACKUP_LOCATION}"
 
   validate:
@@ -65,14 +73,19 @@ actions:
             - pipefail
             - -c
             - |
-              set -euo pipefail
+              set -euxo pipefail
+              export AWS_EC2_METADATA_DISABLED=true
               BACKUP_LOCATION='{{ .ArtifactsIn.cloudObject.KeyValue.backupLocation }}'
-              echo "validating artifact ${BACKUP_LOCATION}"
-              kando location pull --profile '{{ toJson .Profile }}' --path "${BACKUP_LOCATION}" - \
-                | gzip -t
+              PROFILE_JSON='{"Location":{"type":"s3Compliant","bucket":"kanister-drills","endpoint":"http://seaweedfs.kanister.svc.cluster.local:8333","prefix":"drills/","region":"us-east-1"},"Credential":{"Type":"keyPair","KeyPair":{"ID":"admin","Secret":"admin12345"}},"SkipSSLVerify":true}'
+              echo "START validate path=${BACKUP_LOCATION}"
+              if ! kando location pull /tmp/backup.sql.gz --profile "${PROFILE_JSON}" --path "${BACKUP_LOCATION}" > /tmp/kando.out 2>&1; then
+                echo "kando pull failed"
+                grep -iE 'error|fail|denied|unable|invalid|missing|forbidden|connect' /tmp/kando.out || tail -20 /tmp/kando.out
+                exit 1
+              fi
+              gzip -t /tmp/backup.sql.gz
               echo "gzip integrity ok"
-              # Sample first bytes after gunzip to ensure SQL dump, not empty/corrupt object
-              HEAD="$(kando location pull --profile '{{ toJson .Profile }}' --path "${BACKUP_LOCATION}" - | gunzip -c | head -c 64 | tr -d '\0' || true)"
+              HEAD="$(gunzip -c /tmp/backup.sql.gz | head -c 64 | tr -d '\0' || true)"
               echo "dump head: ${HEAD}"
               echo "${HEAD}" | grep -Eqi 'postgres|create|drop|set |--'
               echo "validation ok"
@@ -100,15 +113,16 @@ actions:
             - pipefail
             - -c
             - |
-              set -euo pipefail
+              set -euxo pipefail
+              export AWS_EC2_METADATA_DISABLED=true
               export PGHOST="postgres.{{ .StatefulSet.Namespace }}.svc.cluster.local"
               export PGPORT="5432"
               export PGUSER='{{ index .Phases.pgRestore.Secrets.pgSecret.Data "POSTGRES_USER" | toString }}'
               export PGPASSWORD='{{ index .Phases.pgRestore.Secrets.pgSecret.Data "POSTGRES_PASSWORD" | toString }}'
               export PGDATABASE='{{ index .Phases.pgRestore.Secrets.pgSecret.Data "POSTGRES_DB" | toString }}'
               BACKUP_LOCATION='{{ .ArtifactsIn.cloudObject.KeyValue.backupLocation }}'
-              echo "restoring ${BACKUP_LOCATION} -> ${PGHOST}/${PGDATABASE}"
-              # Wait until Postgres accepts connections in the target namespace
+              PROFILE_JSON='{"Location":{"type":"s3Compliant","bucket":"kanister-drills","endpoint":"http://seaweedfs.kanister.svc.cluster.local:8333","prefix":"drills/","region":"us-east-1"},"Credential":{"Type":"keyPair","KeyPair":{"ID":"admin","Secret":"admin12345"}},"SkipSSLVerify":true}'
+              echo "START restore path=${BACKUP_LOCATION} host=${PGHOST}"
               for i in $(seq 1 60); do
                 if pg_isready -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}"; then
                   break
@@ -116,9 +130,14 @@ actions:
                 sleep 2
               done
               pg_isready -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}"
-              kando location pull --profile '{{ toJson .Profile }}' --path "${BACKUP_LOCATION}" - \
-                | gunzip -c -f \
-                | psql -v ON_ERROR_STOP=1 -h "${PGHOST}" -U "${PGUSER}" -d "${PGDATABASE}"
+              if ! kando location pull /tmp/backup.sql.gz --profile "${PROFILE_JSON}" --path "${BACKUP_LOCATION}" > /tmp/kando.out 2>&1; then
+                echo "kando pull failed"
+                grep -iE 'error|fail|denied|unable|invalid|missing|forbidden|connect' /tmp/kando.out || tail -20 /tmp/kando.out
+                exit 1
+              fi
+              gunzip -c -f /tmp/backup.sql.gz \
+                | grep -v -E 'transaction_timeout' \
+                | psql -v ON_ERROR_STOP=1 -w -h "${PGHOST}" -U "${PGUSER}" -d "${PGDATABASE}"
               echo "restore complete"
 
   delete:

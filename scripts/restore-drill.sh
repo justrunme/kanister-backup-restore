@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROFILE_NS="${PROFILE_NS:-kanister}"
-PROFILE_NAME="${PROFILE_NAME:-minio-profile}"
+PROFILE_NAME="${PROFILE_NAME:-s3-profile}"
 BLUEPRINT="${BLUEPRINT:-postgres-app-aware}"
 NAME="${DEMO_STATEFULSET:-postgres}"
 DRILL_NS="restore-drill-$(date -u +%Y%m%d%H%M%S)"
@@ -13,19 +13,26 @@ FROM="${FROM_ACTIONSET:-}"
 if [[ -z "$FROM" ]]; then
   FROM="$(kubectl -n "$PROFILE_NS" get actionsets -l justrunme.com/phase=backup --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}')"
 fi
-[[ -n "$FROM" ]] || { echo "no backup ActionSet" >&2; exit 1; }
+[[ -n "$FROM" ]] || {
+  echo "no backup ActionSet" >&2
+  exit 1
+}
 
 LOC="$(kubectl -n "$PROFILE_NS" get "actionset/${FROM}" -o jsonpath='{.status.actions[0].artifacts.cloudObject.keyValue.backupLocation}')"
-[[ -n "$LOC" ]] || { echo "empty backupLocation on ${FROM}" >&2; exit 1; }
+[[ -n "$LOC" ]] || {
+  echo "empty backupLocation on ${FROM}" >&2
+  exit 1
+}
 
 echo "restore from ${FROM} -> ns ${DRILL_NS}"
 echo "artifact: ${LOC}"
 
 # Fresh namespace + Postgres (same credentials secret shape the blueprint expects)
-sed "s/name: demo-postgres/name: ${DRILL_NS}/g" "$ROOT/examples/postgres-statefulset.yaml" \
-  | sed "s/postgres-seed/postgres-seed-${DRILL_NS}/g" \
-  | kubectl apply -f -
-
+sed -e "s/name: demo-postgres/name: ${DRILL_NS}/g" \
+  -e "s/namespace: demo-postgres/namespace: ${DRILL_NS}/g" \
+  -e "s/postgres-seed/postgres-seed-${DRILL_NS}/g" \
+  "$ROOT/examples/postgres-statefulset.yaml" | kubectl apply -f -
+kubectl -n "$DRILL_NS" delete job "postgres-seed-${DRILL_NS}" --ignore-not-found
 kubectl -n "$DRILL_NS" rollout status "statefulset/${NAME}" --timeout=180s
 
 cat <<YAML | kubectl apply -f -

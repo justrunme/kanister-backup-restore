@@ -18,6 +18,7 @@ stringData:
   POSTGRES_USER: postgres
   POSTGRES_PASSWORD: demo-change-me
   POSTGRES_DB: app
+  PGPASSWORD: demo-change-me
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -76,16 +77,21 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: postgres:16-alpine
+          image: postgres:17-alpine
           ports:
             - containerPort: 5432
               name: postgres
           envFrom:
             - secretRef:
                 name: postgres-credentials
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+            - name: seed
+              mountPath: /docker-entrypoint-initdb.d
           readinessProbe:
             exec:
               command: ["pg_isready", "-U", "postgres"]
@@ -96,6 +102,10 @@ spec:
               command: ["pg_isready", "-U", "postgres"]
             initialDelaySeconds: 15
             periodSeconds: 10
+      volumes:
+        - name: seed
+          configMap:
+            name: postgres-seed
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -114,18 +124,26 @@ metadata:
     app.kubernetes.io/name: kanister-backup-restore
 spec:
   ttlSecondsAfterFinished: 120
+  backoffLimit: 4
   template:
     spec:
       restartPolicy: OnFailure
       containers:
         - name: seed
-          image: postgres:16-alpine
+          image: postgres:17-alpine
           envFrom:
             - secretRef:
                 name: postgres-credentials
           env:
             - name: PGHOST
-              value: postgres.demo-postgres.svc.cluster.local
+              value: postgres
+            - name: PGPORT
+              value: "5432"
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_PASSWORD
           volumeMounts:
             - name: seed
               mountPath: /seed
@@ -134,12 +152,24 @@ spec:
             - -c
             - |
               set -euo pipefail
-              for i in $(seq 1 60); do
-                pg_isready -h "$PGHOST" -U "$POSTGRES_USER" && break
+              echo "Waiting for Postgres at ${PGHOST}:${PGPORT}..."
+              for i in $(seq 1 90); do
+                if pg_isready -h "$PGHOST" -p "$PGPORT" -U "$POSTGRES_USER"; then
+                  echo "Postgres is ready"
+                  break
+                fi
+                if [ "$i" -eq 90 ]; then
+                  echo "Timeout waiting for Postgres" >&2
+                  exit 1
+                fi
                 sleep 2
               done
-              psql -h "$PGHOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /seed/seed.sql
-              psql -h "$PGHOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'SELECT id, note, created_at FROM recovery_markers ORDER BY id DESC LIMIT 5;'
+              echo "Running seed SQL..."
+              psql -w -h "$PGHOST" -p "$PGPORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /seed/seed.sql
+              echo "Verifying seeded data..."
+              psql -w -h "$PGHOST" -p "$PGPORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+                -c 'SELECT id, note, created_at FROM recovery_markers ORDER BY id DESC LIMIT 5;'
+              echo "Seed complete"
       volumes:
         - name: seed
           configMap:

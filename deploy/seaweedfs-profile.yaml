@@ -1,0 +1,170 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kanister
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+    justrunme.com/role: recovery-plane
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: s3-creds
+  namespace: kanister
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+type: Opaque
+stringData:
+  access_key: admin
+  secret_key: admin12345
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: seaweedfs-s3-config
+  namespace: kanister
+data:
+  s3.json: |
+    {
+      "identities": [
+        {
+          "name": "admin",
+          "credentials": [
+            {
+              "accessKey": "admin",
+              "secretKey": "admin12345"
+            }
+          ],
+          "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seaweedfs
+  namespace: kanister
+  labels:
+    app: seaweedfs
+    app.kubernetes.io/name: kanister-backup-restore
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: seaweedfs
+  template:
+    metadata:
+      labels:
+        app: seaweedfs
+    spec:
+      containers:
+        - name: seaweedfs
+          image: chrislusf/seaweedfs:3.85
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              exec weed server \
+                -ip="${POD_IP}" \
+                -ip.bind=0.0.0.0 \
+                -dir=/data \
+                -s3 \
+                -s3.port=8333 \
+                -s3.config=/etc/seaweedfs/s3.json \
+                -master.port=9333 \
+                -filer.port=8888 \
+                -volume.port=8080 \
+                -master.volumeSizeLimitMB=100 \
+                -volume.max=16
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          ports:
+            - containerPort: 8333
+              name: s3
+            - containerPort: 8888
+              name: filer
+            - containerPort: 9333
+              name: master
+            - containerPort: 8080
+              name: volume
+            - containerPort: 18888
+              name: filer-grpc
+            - containerPort: 19333
+              name: master-grpc
+          readinessProbe:
+            tcpSocket:
+              port: 8333
+            initialDelaySeconds: 8
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 8333
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: s3-config
+              mountPath: /etc/seaweedfs
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: s3-config
+          configMap:
+            name: seaweedfs-s3-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seaweedfs
+  namespace: kanister
+spec:
+  selector:
+    app: seaweedfs
+  ports:
+    - name: s3
+      port: 8333
+      targetPort: 8333
+    - name: filer
+      port: 8888
+      targetPort: 8888
+    - name: filer-grpc
+      port: 18888
+      targetPort: 18888
+    - name: master
+      port: 9333
+      targetPort: 9333
+    - name: master-grpc
+      port: 19333
+      targetPort: 19333
+    - name: volume
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: cr.kanister.io/v1alpha1
+kind: Profile
+metadata:
+  name: s3-profile
+  namespace: kanister
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+location:
+  type: s3Compliant
+  bucket: kanister-drills
+  endpoint: http://seaweedfs.kanister.svc.cluster.local:8333
+  prefix: drills/
+  region: us-east-1
+credential:
+  type: keyPair
+  keyPair:
+    idField: access_key
+    secretField: secret_key
+    secret:
+      apiVersion: v1
+      kind: Secret
+      name: s3-creds
+      namespace: kanister
+skipSSLVerify: true
