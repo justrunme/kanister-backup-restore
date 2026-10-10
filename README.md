@@ -10,6 +10,7 @@ Restore should be proved, not assumed.
 [![Release](https://img.shields.io/github/v/release/justrunme/kanister-backup-restore?display_name=tag)](https://github.com/justrunme/kanister-backup-restore/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Case study](https://img.shields.io/badge/case-justrunme.com-111111)](https://justrunme.com/cases/kanister-backup-restore/)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/justrunme/kanister-backup-restore/badge)](https://securityscorecards.dev/viewer/?uri=github.com/justrunme/kanister-backup-restore)
 
 Case study: [Kanister Backup & Restore](https://justrunme.com/cases/kanister-backup-restore/) · [Andrey Lesnikov](https://justrunme.com/)
 
