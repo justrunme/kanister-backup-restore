@@ -1,28 +1,43 @@
 # Kanister Recovery Contract
 
-**Restore should be proved, not assumed.**
-
-<p align="center">
-  <img src="docs/assets/recovery-lifecycle.svg" alt="PROTECT → VALIDATE → RESTORE → PROVE" width="100%" />
-</p>
-
-Kanister already gives you Blueprints, ActionSets, and Profiles.  
-This repository adds the missing layer: a **Recovery Contract** that turns a backup into a measurable proof of recoverability.
+Restore should be proved, not assumed.
 
 [![CI](https://github.com/justrunme/kanister-backup-restore/actions/workflows/ci.yml/badge.svg)](https://github.com/justrunme/kanister-backup-restore/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/justrunme/kanister-backup-restore?display_name=tag)](https://github.com/justrunme/kanister-backup-restore/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Case study](https://img.shields.io/badge/case-justrunme.com-111111)](https://justrunme.com/cases/kanister-backup-restore/)
 
 Case study: [Kanister Backup & Restore](https://justrunme.com/cases/kanister-backup-restore/) · [Andrey Lesnikov](https://justrunme.com/)
 
-```text
-PROTECT → VALIDATE → RESTORE → PROVE
+## What it does
+
+- Runs a Kanister-based drill: PROTECT → VALIDATE → RESTORE → PROVE on Kind with MinIO
+- Evaluates a Recovery Contract (artifact integrity, isolated restore, app ready, RTO/freshness)
+- Emits binary PROVED / UNPROVED verdicts with evidence under `.evidence/`
+
+## Why
+
+- A successful backup job is not proof of application recoverability
+- Volume snapshots preserve bytes; recovery needs ordered restore, validation, and measured RTO
+
+## Quickstart
+
+```bash
+make full-drill
 ```
 
-Verdict is binary: **PROVED** or **UNPROVED**.  
-No percentage scores — only contract clauses and measured RTO / RPO / freshness.
+## Architecture
 
----
+```mermaid
+flowchart LR
+  Kind[Kind cluster] --> Kan[Kanister operator]
+  Kan --> BP[blueprints/postgres]
+  BP --> MinIO[profiles / MinIO]
+  Scripts[make recovery-drill] --> Protect[PROTECT ActionSet]
+  Protect --> Validate[VALIDATE artifact]
+  Validate --> Restore[RESTORE isolated ns]
+  Restore --> Prove[PROVE contract evidence]
+  CI[.github/workflows/ci.yml] --> Drill[recovery-drill.yml]
+```
 
 ## Recovery Contract
 
