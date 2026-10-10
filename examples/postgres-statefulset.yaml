@@ -86,6 +86,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+            - name: seed
+              mountPath: /docker-entrypoint-initdb.d
           readinessProbe:
             exec:
               command: ["pg_isready", "-U", "postgres"]
@@ -96,6 +98,10 @@ spec:
               command: ["pg_isready", "-U", "postgres"]
             initialDelaySeconds: 15
             periodSeconds: 10
+      volumes:
+        - name: seed
+          configMap:
+            name: postgres-seed
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -104,54 +110,3 @@ spec:
         resources:
           requests:
             storage: 2Gi
----
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: postgres-seed
-  namespace: demo-postgres
-  labels:
-    app.kubernetes.io/name: kanister-backup-restore
-spec:
-  ttlSecondsAfterFinished: 120
-  template:
-    spec:
-      restartPolicy: OnFailure
-      containers:
-        - name: seed
-          image: postgres:16-alpine
-          envFrom:
-            - secretRef:
-                name: postgres-credentials
-          env:
-            - name: PGHOST
-              value: postgres.demo-postgres.svc.cluster.local
-          volumeMounts:
-            - name: seed
-              mountPath: /seed
-          command:
-            - /bin/sh
-            - -c
-            - |
-              set -euo pipefail
-              echo "Waiting for Postgres to be ready..."
-              for i in $(seq 1 90); do
-                if pg_isready -h "$PGHOST" -U "$POSTGRES_USER" 2>/dev/null; then
-                  echo "Postgres is ready"
-                  break
-                fi
-                if [ $i -eq 90 ]; then
-                  echo "Timeout waiting for Postgres"
-                  exit 1
-                fi
-                sleep 2
-              done
-              echo "Running seed SQL..."
-              psql -h "$PGHOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /seed/seed.sql
-              echo "Verifying seeded data..."
-              psql -h "$PGHOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'SELECT id, note, created_at FROM recovery_markers ORDER BY id DESC LIMIT 5;'
-              echo "Seed complete"
-      volumes:
-        - name: seed
-          configMap:
-            name: postgres-seed
