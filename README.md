@@ -2,9 +2,14 @@
 
 Restore should be proved, not assumed.
 
+<p align="center">
+  <img src="docs/assets/recovery-lifecycle.svg" alt="PROTECT → VALIDATE → RESTORE → PROVE" width="100%" />
+</p>
+
 [![CI](https://github.com/justrunme/kanister-backup-restore/actions/workflows/ci.yml/badge.svg)](https://github.com/justrunme/kanister-backup-restore/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/justrunme/kanister-backup-restore?display_name=tag)](https://github.com/justrunme/kanister-backup-restore/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Case study](https://img.shields.io/badge/case-justrunme.com-111111)](https://justrunme.com/cases/kanister-backup-restore/)
 
 Case study: [Kanister Backup & Restore](https://justrunme.com/cases/kanister-backup-restore/) · [Andrey Lesnikov](https://justrunme.com/)
 
@@ -180,7 +185,6 @@ Measured from Recovery Drill CI (not estimates). Details: [docs/results.md](docs
 | RPO | 26 s | 25 s | same run artifacts |
 | Happy-path verdict | **PROVED** | **PROVED** | `recovery-evidence-k8s-*` |
 | Failure `corrupt-artifact` | **UNPROVED** (`artifact_integrity`) | same | same run |
-
 
 ## License
 
