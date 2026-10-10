@@ -134,12 +134,23 @@ spec:
             - -c
             - |
               set -euo pipefail
-              for i in $(seq 1 60); do
-                pg_isready -h "$PGHOST" -U "$POSTGRES_USER" && break
+              echo "Waiting for Postgres to be ready..."
+              for i in $(seq 1 90); do
+                if pg_isready -h "$PGHOST" -U "$POSTGRES_USER" 2>/dev/null; then
+                  echo "Postgres is ready"
+                  break
+                fi
+                if [ $i -eq 90 ]; then
+                  echo "Timeout waiting for Postgres"
+                  exit 1
+                fi
                 sleep 2
               done
+              echo "Running seed SQL..."
               psql -h "$PGHOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /seed/seed.sql
+              echo "Verifying seeded data..."
               psql -h "$PGHOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'SELECT id, note, created_at FROM recovery_markers ORDER BY id DESC LIMIT 5;'
+              echo "Seed complete"
       volumes:
         - name: seed
           configMap:
