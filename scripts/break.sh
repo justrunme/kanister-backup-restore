@@ -45,7 +45,7 @@ case "$SCENARIO" in
       echo "empty backupLocation" >&2
       exit 1
     }
-    # Corrupt object via direct file manipulation in s3mock
+    # Overwrite the artifact via the SeaweedFS filer (S3 PUT needs SigV4).
     kubectl -n "$PROFILE_NS" delete job break-corrupt-artifact --ignore-not-found
     cat <<YAML | kubectl apply -f -
 apiVersion: batch/v1
@@ -64,14 +64,16 @@ spec:
           env:
             - name: OBJECT
               value: "drills/${LOC}"
-          command: ["/bin/sh","-c"]
+          command: ["/bin/sh", "-c"]
           args:
             - |
               set -euo pipefail
-              echo "corrupting object for ${LOC}"
-              # Path-style PUT against adobe/s3mock (bucket/prefix/key)
-              curl -sfS -X PUT --data 'NOT-A-GZIP-ARTIFACT' \
-                "http://seaweedfs.kanister.svc.cluster.local:8333/kanister-drills/drills/${LOC}"
+              FILER="http://seaweedfs.kanister.svc.cluster.local:8888"
+              DEST="${FILER}/buckets/kanister-drills/${OBJECT}"
+              echo "corrupting object at ${DEST}"
+              curl -sS -X DELETE "$DEST" || true
+              printf 'NOT-A-GZIP-ARTIFACT' > /tmp/corrupt
+              curl -sS -f -F "file=@/tmp/corrupt" "$DEST"
               echo "corrupt-artifact applied"
 YAML
     kubectl -n "$PROFILE_NS" wait --for=condition=complete job/break-corrupt-artifact --timeout=120s

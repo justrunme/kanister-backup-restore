@@ -88,6 +88,9 @@ jobs:
             kubectl get actionsets -A -o wide || true
             echo "=== pods ==="
             kubectl get pods -A || true
+            echo "=== seaweedfs ==="
+            kubectl -n kanister logs deploy/seaweedfs --tail=50 || true
+            kubectl -n kanister logs job/seaweedfs-bootstrap-bucket --tail=80 || true
             echo "=== postgres-seed ==="
             kubectl -n demo-postgres describe job/postgres-seed || true
             kubectl -n demo-postgres logs job/postgres-seed --tail=80 || true
