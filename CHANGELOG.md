@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.0] - 2026-10-10
+
+First stable release of the Kanister Recovery Contract pack:
+PROTECT → VALIDATE → RESTORE → PROVE with binary **PROVED** / **UNPROVED** verdicts.
+
+- Real recovery drill in CI on kind (Kubernetes v1.37 / v1.36): `full-drill` must be **PROVED**, `failure-drill SCENARIO=corrupt-artifact` must be **UNPROVED**
+- SeaweedFS S3-compatible object storage (replaces MinIO for public image pulls)
+- Centralized tool and component versions in `config/versions.env`
+- Prometheus metrics (`recovery_contract_verdict`, `recovery_rto_seconds`, `recovery_evidence_age_hours`) and `deploy/prometheus-rules.yaml` alerts
+- shellcheck and shfmt gates in CI; scripts formatted
+
 ## 0.4.0 — 2026-09-06
 
 - **Recovery Contract** replaces percentage confidence scoring
