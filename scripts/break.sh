@@ -71,7 +71,7 @@ spec:
               echo "corrupting object for ${LOC}"
               # Path-style PUT against adobe/s3mock (bucket/prefix/key)
               curl -sfS -X PUT --data 'NOT-A-GZIP-ARTIFACT' \
-                "http://s3mock.kanister.svc.cluster.local:9090/kanister-drills/drills/${LOC}"
+                "http://seaweedfs.kanister.svc.cluster.local:8333/kanister-drills/drills/${LOC}"
               echo "corrupt-artifact applied"
 YAML
     kubectl -n "$PROFILE_NS" wait --for=condition=complete job/break-corrupt-artifact --timeout=120s

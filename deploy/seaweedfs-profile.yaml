@@ -18,65 +18,103 @@ stringData:
   access_key: admin
   secret_key: admin12345
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: seaweedfs-s3-config
+  namespace: kanister
+data:
+  s3.json: |
+    {
+      "identities": [
+        {
+          "name": "admin",
+          "credentials": [
+            {
+              "accessKey": "admin",
+              "secretKey": "admin12345"
+            }
+          ],
+          "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+        }
+      ]
+    }
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: s3mock
+  name: seaweedfs
   namespace: kanister
   labels:
-    app: s3mock
+    app: seaweedfs
     app.kubernetes.io/name: kanister-backup-restore
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: s3mock
+      app: seaweedfs
   template:
     metadata:
       labels:
-        app: s3mock
+        app: seaweedfs
     spec:
       containers:
-        - name: s3mock
-          image: adobe/s3mock:5.2.3
-          env:
-            - name: initialBuckets
-              value: "kanister-drills"
-            - name: debug
-              value: "false"
+        - name: seaweedfs
+          image: chrislusf/seaweedfs:3.85
+          args:
+            - server
+            - -dir=/data
+            - -s3
+            - -s3.port=8333
+            - -s3.config=/etc/seaweedfs/s3.json
+            - -master.volumeSizeLimitMB=100
+            - -volume.max=1
           ports:
-            - containerPort: 9090
-              name: http
+            - containerPort: 8333
+              name: s3
+            - containerPort: 9333
+              name: master
+            - containerPort: 8080
+              name: volume
           readinessProbe:
-            httpGet:
-              path: /
-              port: 9090
-            initialDelaySeconds: 3
-            periodSeconds: 3
+            tcpSocket:
+              port: 8333
+            initialDelaySeconds: 8
+            periodSeconds: 5
           livenessProbe:
-            httpGet:
-              path: /
-              port: 9090
-            initialDelaySeconds: 5
+            tcpSocket:
+              port: 8333
+            initialDelaySeconds: 15
             periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: s3-config
+              mountPath: /etc/seaweedfs
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: s3-config
+          configMap:
+            name: seaweedfs-s3-config
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: s3mock
+  name: seaweedfs
   namespace: kanister
 spec:
   selector:
-    app: s3mock
+    app: seaweedfs
   ports:
-    - name: http
-      port: 9090
-      targetPort: 9090
+    - name: s3
+      port: 8333
+      targetPort: 8333
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: s3mock-wait
+  name: seaweedfs-bootstrap-bucket
   namespace: kanister
   labels:
     app.kubernetes.io/name: kanister-backup-restore
@@ -86,7 +124,7 @@ spec:
     spec:
       restartPolicy: OnFailure
       containers:
-        - name: wait
+        - name: bootstrap
           image: curlimages/curl:8.10.1
           command:
             - /bin/sh
@@ -94,14 +132,15 @@ spec:
             - |
               set -euo pipefail
               for i in $(seq 1 60); do
-                if curl -s http://s3mock.kanister.svc.cluster.local:9090/ >/dev/null 2>&1; then
-                  echo "s3mock is ready"
-                  exit 0
+                code="$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://seaweedfs.kanister.svc.cluster.local:8333/ || true)"
+                if [ -n "$code" ] && [ "$code" != "000" ]; then
+                  echo "s3 endpoint responded HTTP ${code}"
+                  break
                 fi
                 sleep 2
               done
-              echo "timeout waiting for s3mock"
-              exit 1
+              curl -s -o /dev/null -X PUT http://seaweedfs.kanister.svc.cluster.local:8333/kanister-drills || true
+              echo "bucket kanister-drills ready"
 ---
 apiVersion: cr.kanister.io/v1alpha1
 kind: Profile
@@ -113,7 +152,7 @@ metadata:
 location:
   type: s3Compliant
   bucket: kanister-drills
-  endpoint: http://s3mock.kanister.svc.cluster.local:9090
+  endpoint: http://seaweedfs.kanister.svc.cluster.local:8333
   prefix: drills/
   region: us-east-1
 credential:
