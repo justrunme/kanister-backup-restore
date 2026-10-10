@@ -20,8 +20,8 @@ minio: ## MinIO + bucket + Kanister Profile
 demo-app: ## Demo Postgres + seed data
 	kubectl delete job -n demo-postgres postgres-seed --ignore-not-found
 	kubectl apply -f examples/postgres-statefulset.yaml
-	kubectl -n demo-postgres rollout status statefulset/postgres --timeout=180s
-	kubectl -n demo-postgres wait --for=condition=complete job/postgres-seed --timeout=180s
+	kubectl -n demo-postgres rollout status statefulset/postgres --timeout=300s
+	kubectl -n demo-postgres wait --for=condition=complete job/postgres-seed --timeout=300s
 
 apply-blueprints: ## Apply Blueprint CRs
 	./scripts/apply-blueprints.sh
