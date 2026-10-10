@@ -32,7 +32,7 @@ sed -e "s/name: demo-postgres/name: ${DRILL_NS}/g" \
   -e "s/namespace: demo-postgres/namespace: ${DRILL_NS}/g" \
   -e "s/postgres-seed/postgres-seed-${DRILL_NS}/g" \
   "$ROOT/examples/postgres-statefulset.yaml" | kubectl apply -f -
-
+kubectl -n "$DRILL_NS" delete job "postgres-seed-${DRILL_NS}" --ignore-not-found
 kubectl -n "$DRILL_NS" rollout status "statefulset/${NAME}" --timeout=180s
 
 cat <<YAML | kubectl apply -f -

@@ -170,6 +170,8 @@ sed -e "s/name: demo-postgres/name: ${DRILL_NS}/g" \
   -e "s/namespace: demo-postgres/namespace: ${DRILL_NS}/g" \
   -e "s/postgres-seed/postgres-seed-${DRILL_NS}/g" \
   "$ROOT/examples/postgres-statefulset.yaml" | kubectl apply -f -
+# The seed Job races pg_restore (--clean). Initdb already applied seed.sql.
+kubectl -n "$DRILL_NS" delete job "postgres-seed-${DRILL_NS}" --ignore-not-found
 kubectl -n "$DRILL_NS" rollout status statefulset/postgres --timeout=180s
 
 if [[ "$SCENARIO" == "wrong-secret" ]]; then
@@ -236,6 +238,12 @@ if [[ "$RESTORE_OK" == true ]]; then
 else
   BLOCKED_AT="${BLOCKED_AT:-restore}"
   echo "   isolated_restore FAIL"
+  kubectl -n "$PROFILE_NS" describe "actionset/${RESTORE_AS}" >&2 || true
+  kubectl get pods -A | grep -E 'kanister-job|NAME' >&2 || true
+  for p in $(kubectl -n "$DRILL_NS" get pods -o name 2>/dev/null | grep kanister-job || true); do
+    echo "=== logs ${DRILL_NS}/${p} ===" >&2
+    kubectl -n "$DRILL_NS" logs "$p" --tail=80 >&2 || true
+  done
 fi
 
 # --- PROVE ---

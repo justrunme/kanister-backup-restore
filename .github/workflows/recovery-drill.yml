@@ -77,16 +77,6 @@ jobs:
         run: |
           make full-drill
 
-      - name: Dump cluster on failure
-        if: failure()
-        run: |
-          echo "## cluster dump" >> "$GITHUB_STEP_SUMMARY"
-          chmod +x scripts/dump-cluster.sh
-          ./scripts/dump-cluster.sh | tee /tmp/cluster-dump.txt
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          tail -n 120 /tmp/cluster-dump.txt >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-      
       - name: Verify PROVED verdict
         run: |
           if ! grep -q '"verdict": "PROVED"' .evidence/recovery-verdict.json; then
@@ -118,15 +108,31 @@ jobs:
             exit 1
           fi
           echo "✓ Failure drill correctly detected corrupted artifact"
+
+      - name: Dump cluster on failure
+        if: failure()
+        run: |
+          echo "## cluster dump" >> "$GITHUB_STEP_SUMMARY"
+          chmod +x scripts/dump-cluster.sh
+          ./scripts/dump-cluster.sh | tee /tmp/cluster-dump.txt
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -n 120 /tmp/cluster-dump.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stage evidence for upload
+        if: always()
+        run: |
+          mkdir -p /tmp/drill-out
+          cp -a .evidence /tmp/drill-out/evidence 2>/dev/null || true
+          cp -a .metrics /tmp/drill-out/metrics 2>/dev/null || true
       
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: recovery-evidence-k8s-${{ matrix.k8s }}
-          path: |
-            .evidence/
-            .metrics/
+          path: /tmp/drill-out
+          if-no-files-found: warn
       
       - name: Write job summary
         if: always()
