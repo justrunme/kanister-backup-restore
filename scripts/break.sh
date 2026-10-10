@@ -45,38 +45,12 @@ case "$SCENARIO" in
       echo "empty backupLocation" >&2
       exit 1
     }
-    # Overwrite the artifact via the SeaweedFS filer (S3 PUT needs SigV4).
-    kubectl -n "$PROFILE_NS" delete job break-corrupt-artifact --ignore-not-found
-    cat <<YAML | kubectl apply -f -
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: break-corrupt-artifact
-  namespace: ${PROFILE_NS}
-spec:
-  ttlSecondsAfterFinished: 60
-  template:
-    spec:
-      restartPolicy: Never
-      containers:
-        - name: corrupt
-          image: curlimages/curl:8.10.1
-          env:
-            - name: OBJECT
-              value: "drills/${LOC}"
-          command: ["/bin/sh", "-c"]
-          args:
-            - |
-              set -euo pipefail
-              FILER="http://seaweedfs.kanister.svc.cluster.local:8888"
-              DEST="${FILER}/buckets/kanister-drills/${OBJECT}"
-              echo "corrupting object at ${DEST}"
-              curl -sS -X DELETE "$DEST" || true
-              printf 'NOT-A-GZIP-ARTIFACT' > /tmp/corrupt
-              curl -sS -f -F "file=@/tmp/corrupt" "$DEST"
-              echo "corrupt-artifact applied"
-YAML
-    kubectl -n "$PROFILE_NS" wait --for=condition=complete job/break-corrupt-artifact --timeout=120s
+    # Overwrite from the runner (SigV4). In-cluster Jobs that wait on a
+    # service have hung this drill twice already.
+    CORRUPT="$(mktemp)"
+    printf 'NOT-A-GZIP-ARTIFACT' >"$CORRUPT"
+    "$ROOT/scripts/s3-object.sh" put "drills/${LOC}" "$CORRUPT"
+    rm -f "$CORRUPT"
     cat >"$STATE_FILE" <<EOF
 BREAK_SCENARIO=corrupt-artifact
 BREAK_BACKUP_ACTIONSET=${FROM}

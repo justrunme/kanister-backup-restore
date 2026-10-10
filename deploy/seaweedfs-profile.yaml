@@ -144,53 +144,6 @@ spec:
       port: 8080
       targetPort: 8080
 ---
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: seaweedfs-bootstrap-bucket
-  namespace: kanister
-  labels:
-    app.kubernetes.io/name: kanister-backup-restore
-spec:
-  ttlSecondsAfterFinished: 600
-  backoffLimit: 4
-  template:
-    spec:
-      restartPolicy: OnFailure
-      containers:
-        - name: bootstrap
-          image: chrislusf/seaweedfs:3.85
-          command:
-            - /bin/sh
-            - -c
-            - |
-              set -euo pipefail
-              MASTER="seaweedfs.kanister.svc.cluster.local:9333"
-              FILER="seaweedfs.kanister.svc.cluster.local:8888"
-              ready=0
-              for i in $(seq 1 90); do
-                if echo 's3.bucket.list' | weed shell -master="$MASTER" -filer="$FILER"; then
-                  ready=1
-                  break
-                fi
-                echo "waiting for filer (${i})"
-                sleep 2
-              done
-              if [ "$ready" != "1" ]; then
-                echo "filer never became ready" >&2
-                exit 1
-              fi
-              echo "fs.configure -locationPrefix=/buckets/ -volumeGrowthCount=1 -apply" \
-                | weed shell -master="$MASTER" -filer="$FILER" || true
-              if ! echo 's3.bucket.list' | weed shell -master="$MASTER" -filer="$FILER" | grep -q 'kanister-drills'; then
-                echo "s3.bucket.create -name kanister-drills -owner admin" \
-                  | weed shell -master="$MASTER" -filer="$FILER"
-              fi
-              echo "s3.bucket.list" | weed shell -master="$MASTER" -filer="$FILER" | tee /tmp/buckets.txt
-              echo "fs.list /buckets/" | weed shell -master="$MASTER" -filer="$FILER" || true
-              grep -q "kanister-drills" /tmp/buckets.txt
-              echo "bucket kanister-drills ready"
----
 apiVersion: cr.kanister.io/v1alpha1
 kind: Profile
 metadata:
