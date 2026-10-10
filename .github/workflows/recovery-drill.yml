@@ -93,6 +93,14 @@ jobs:
             kubectl -n demo-postgres logs job/postgres-seed --tail=80 || true
             echo "=== postgres sts ==="
             kubectl -n demo-postgres logs sts/postgres --tail=40 || true
+            echo "=== kanister job pods ==="
+            kubectl get pods -A | grep -E 'kanister|NAME' || true
+            for ns in demo-postgres kanister; do
+              for p in $(kubectl -n "$ns" get pods -o name 2>/dev/null | grep -E 'kanister-job|job-' || true); do
+                echo "=== logs $ns/$p ==="
+                kubectl -n "$ns" logs "$p" --tail=80 || true
+              done
+            done
             echo "=== latest actionset ==="
             kubectl -n kanister get actionsets -o yaml || true
             echo "=== events ==="
