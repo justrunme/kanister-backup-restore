@@ -42,12 +42,12 @@ actions:
               export PGUSER='{{ index .Phases.pgDump.Secrets.pgSecret.Data "POSTGRES_USER" | toString }}'
               export PGPASSWORD='{{ index .Phases.pgDump.Secrets.pgSecret.Data "POSTGRES_PASSWORD" | toString }}'
               export PGDATABASE='{{ index .Phases.pgDump.Secrets.pgSecret.Data "POSTGRES_DB" | toString }}'
-              BACKUP_LOCATION="pg_backups/{{ .StatefulSet.Namespace }}/{{ .StatefulSet.Name }}/{{ toDate "2006-01-02T15:04:05.999999999Z07:00" .Time | date "2006-01-02T15:04:05Z07:00" }}/backup.sql.gz"
+              BACKUP_LOCATION="pg_backups/{{ .StatefulSet.Namespace }}/{{ .StatefulSet.Name }}/backup.sql.gz"
               PROFILE_JSON='{"Location":{"type":"s3Compliant","bucket":"kanister-drills","endpoint":"http://s3mock.kanister.svc.cluster.local:9090","prefix":"drills/","region":"us-east-1"},"Credential":{"Type":"keyPair","KeyPair":{"ID":"admin","Secret":"admin12345"}},"SkipSSLVerify":true}'
               echo "START backup host=${PGHOST} db=${PGDATABASE} path=${BACKUP_LOCATION} profile_len=${#PROFILE_JSON}"
               pg_dump --clean --if-exists -U "${PGUSER}" "${PGDATABASE}" | gzip -c > /tmp/backup.sql.gz
               echo "dump bytes=$(wc -c < /tmp/backup.sql.gz)"
-              kando location push --profile "${PROFILE_JSON}" --path "${BACKUP_LOCATION}" /tmp/backup.sql.gz
+              kando location push /tmp/backup.sql.gz --profile "${PROFILE_JSON}" --path "${BACKUP_LOCATION}"
               kando output backupLocation "${BACKUP_LOCATION}"
 
   validate:
@@ -73,7 +73,7 @@ actions:
               BACKUP_LOCATION='{{ .ArtifactsIn.cloudObject.KeyValue.backupLocation }}'
               PROFILE_JSON='{"Location":{"type":"s3Compliant","bucket":"kanister-drills","endpoint":"http://s3mock.kanister.svc.cluster.local:9090","prefix":"drills/","region":"us-east-1"},"Credential":{"Type":"keyPair","KeyPair":{"ID":"admin","Secret":"admin12345"}},"SkipSSLVerify":true}'
               echo "START validate path=${BACKUP_LOCATION}"
-              kando location pull --profile "${PROFILE_JSON}" --path "${BACKUP_LOCATION}" /tmp/backup.sql.gz
+              kando location pull /tmp/backup.sql.gz --profile "${PROFILE_JSON}" --path "${BACKUP_LOCATION}"
               gzip -t /tmp/backup.sql.gz
               echo "gzip integrity ok"
               HEAD="$(gunzip -c /tmp/backup.sql.gz | head -c 64 | tr -d '\0' || true)"
@@ -121,7 +121,7 @@ actions:
                 sleep 2
               done
               pg_isready -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}"
-              kando location pull --profile "${PROFILE_JSON}" --path "${BACKUP_LOCATION}" /tmp/backup.sql.gz
+              kando location pull /tmp/backup.sql.gz --profile "${PROFILE_JSON}" --path "${BACKUP_LOCATION}"
               gunzip -c -f /tmp/backup.sql.gz | psql -v ON_ERROR_STOP=1 -h "${PGHOST}" -U "${PGUSER}" -d "${PGDATABASE}"
               echo "restore complete"
 
