@@ -25,6 +25,20 @@ Case study: [Kanister Backup & Restore](https://justrunme.com/cases/kanister-bac
 make full-drill
 ```
 
+## Architecture
+
+```mermaid
+flowchart LR
+  Kind[Kind cluster] --> Kan[Kanister operator]
+  Kan --> BP[blueprints/postgres]
+  BP --> MinIO[profiles / MinIO]
+  Scripts[make recovery-drill] --> Protect[PROTECT ActionSet]
+  Protect --> Validate[VALIDATE artifact]
+  Validate --> Restore[RESTORE isolated ns]
+  Restore --> Prove[PROVE contract evidence]
+  CI[.github/workflows/ci.yml] --> Drill[recovery-drill.yml]
+```
+
 ## Recovery Contract
 
 ```text
