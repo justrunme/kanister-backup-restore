@@ -76,6 +76,31 @@ jobs:
           K8S_VERSION: ${{ matrix.k8s }}
         run: |
           make full-drill
+
+      - name: Dump cluster on failure
+        if: failure()
+        run: |
+          echo "## cluster dump" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "=== blueprints ==="
+            kubectl get blueprints -A || true
+            echo "=== actionsets ==="
+            kubectl get actionsets -A -o wide || true
+            echo "=== pods ==="
+            kubectl get pods -A || true
+            echo "=== postgres-seed ==="
+            kubectl -n demo-postgres describe job/postgres-seed || true
+            kubectl -n demo-postgres logs job/postgres-seed --tail=80 || true
+            echo "=== postgres sts ==="
+            kubectl -n demo-postgres logs sts/postgres --tail=40 || true
+            echo "=== latest actionset ==="
+            kubectl -n kanister get actionsets -o yaml || true
+            echo "=== events ==="
+            kubectl get events -A --sort-by=.lastTimestamp | tail -40 || true
+          } | tee /tmp/cluster-dump.txt
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -n 80 /tmp/cluster-dump.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
       
       - name: Verify PROVED verdict
         run: |

@@ -31,7 +31,13 @@ wait_actionset() {
 
 kubectl apply -f "$ROOT/examples/postgres-statefulset.yaml"
 kubectl -n "$NS" rollout status "statefulset/${NAME}" --timeout=180s
-kubectl -n "$NS" wait --for=condition=complete job/postgres-seed --timeout=180s || true
+if kubectl -n "$NS" get job/postgres-seed >/dev/null 2>&1; then
+  kubectl -n "$NS" wait --for=condition=complete job/postgres-seed --timeout=180s || {
+    echo "postgres-seed job did not complete; dumping logs" >&2
+    kubectl -n "$NS" logs job/postgres-seed --tail=80 >&2 || true
+    kubectl -n "$NS" describe job/postgres-seed >&2 || true
+  }
+fi
 
 ARTIFACTS_BLOCK=""
 if [[ "$ACTION" == "validate" || "$ACTION" == "restore" ]]; then

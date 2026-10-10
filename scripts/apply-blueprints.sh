@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-kubectl apply -f "$ROOT/blueprints/postgres/blueprint.yaml"
-kubectl apply -f "$ROOT/blueprints/generic-pvc/blueprint.yaml"
-kubectl get blueprints
-echo "blueprints applied"
+NS="${KANISTER_NAMESPACE:-kanister}"
+
+kubectl apply -n "$NS" -f "$ROOT/blueprints/postgres/blueprint.yaml"
+kubectl apply -n "$NS" -f "$ROOT/blueprints/generic-pvc/blueprint.yaml"
+kubectl -n "$NS" get blueprints
+echo "blueprints applied in namespace ${NS}"

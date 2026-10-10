@@ -59,17 +59,9 @@ spec:
     spec:
       restartPolicy: Never
       containers:
-        - name: aws-cli
-          image: amazon/aws-cli:2.18.20
+        - name: corrupt
+          image: curlimages/curl:8.10.1
           env:
-            - name: AWS_ACCESS_KEY_ID
-              valueFrom: { secretKeyRef: { name: s3-creds, key: access_key } }
-            - name: AWS_SECRET_ACCESS_KEY
-              valueFrom: { secretKeyRef: { name: s3-creds, key: secret_key } }
-            - name: AWS_ENDPOINT_URL
-              value: "http://s3mock.kanister.svc.cluster.local:9090"
-            - name: AWS_DEFAULT_REGION
-              value: "us-east-1"
             - name: OBJECT
               value: "drills/${LOC}"
           command: ["/bin/sh","-c"]
@@ -77,7 +69,9 @@ spec:
             - |
               set -euo pipefail
               echo "corrupting object for ${LOC}"
-              echo 'NOT-A-GZIP-ARTIFACT' | aws s3 cp - "s3://kanister-drills/drills/${LOC}" --endpoint-url "$AWS_ENDPOINT_URL"
+              # Path-style PUT against adobe/s3mock (bucket/prefix/key)
+              curl -sfS -X PUT --data 'NOT-A-GZIP-ARTIFACT' \
+                "http://s3mock.kanister.svc.cluster.local:9090/kanister-drills/drills/${LOC}"
               echo "corrupt-artifact applied"
 YAML
     kubectl -n "$PROFILE_NS" wait --for=condition=complete job/break-corrupt-artifact --timeout=120s

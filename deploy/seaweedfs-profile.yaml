@@ -42,8 +42,8 @@ spec:
           env:
             - name: initialBuckets
               value: "kanister-drills"
-            - name: root
-              value: "admin:admin12345"
+            - name: debug
+              value: "false"
           ports:
             - containerPort: 9090
               name: http

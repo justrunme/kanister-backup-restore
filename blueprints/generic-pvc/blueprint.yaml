@@ -2,6 +2,7 @@ apiVersion: cr.kanister.io/v1alpha1
 kind: Blueprint
 metadata:
   name: generic-pvc-app-aware
+  namespace: kanister
   labels:
     app.kubernetes.io/name: kanister-backup-restore
     app.kubernetes.io/component: blueprint

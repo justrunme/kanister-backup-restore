@@ -2,6 +2,7 @@ apiVersion: cr.kanister.io/v1alpha1
 kind: Blueprint
 metadata:
   name: postgres-app-aware
+  namespace: kanister
   labels:
     app.kubernetes.io/name: kanister-backup-restore
     app.kubernetes.io/component: blueprint
@@ -35,6 +36,7 @@ actions:
             - -c
             - |
               set -euo pipefail
+              export AWS_EC2_METADATA_DISABLED=true
               export PGHOST="postgres.{{ .StatefulSet.Namespace }}.svc.cluster.local"
               export PGPORT="5432"
               export PGUSER='{{ index .Phases.pgDump.Secrets.pgSecret.Data "POSTGRES_USER" | toString }}'
@@ -66,6 +68,7 @@ actions:
             - -c
             - |
               set -euo pipefail
+              export AWS_EC2_METADATA_DISABLED=true
               BACKUP_LOCATION='{{ .ArtifactsIn.cloudObject.KeyValue.backupLocation }}'
               echo "validating artifact ${BACKUP_LOCATION}"
               kando location pull --profile '{{ toJson .Profile }}' --path "${BACKUP_LOCATION}" - \
@@ -101,6 +104,7 @@ actions:
             - -c
             - |
               set -euo pipefail
+              export AWS_EC2_METADATA_DISABLED=true
               export PGHOST="postgres.{{ .StatefulSet.Namespace }}.svc.cluster.local"
               export PGPORT="5432"
               export PGUSER='{{ index .Phases.pgRestore.Secrets.pgSecret.Data "POSTGRES_USER" | toString }}'
