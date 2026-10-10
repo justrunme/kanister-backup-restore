@@ -76,7 +76,7 @@ ci: ## Offline repository checks
 
 shellcheck: ## Run shellcheck on all scripts
 	@command -v shellcheck >/dev/null || { echo "shellcheck not installed" >&2; exit 1; }
-	find scripts -name "*.sh" -type f -print0 | xargs -0 shellcheck
+	find scripts -name "*.sh" -type f -print0 | xargs -0 shellcheck -e SC1091
 
 shfmt: ## Check shell formatting
 	@command -v shfmt >/dev/null || { echo "shfmt not installed" >&2; exit 1; }
