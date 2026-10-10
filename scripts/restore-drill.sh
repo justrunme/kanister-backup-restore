@@ -28,9 +28,10 @@ echo "restore from ${FROM} -> ns ${DRILL_NS}"
 echo "artifact: ${LOC}"
 
 # Fresh namespace + Postgres (same credentials secret shape the blueprint expects)
-sed "s/name: demo-postgres/name: ${DRILL_NS}/g" "$ROOT/examples/postgres-statefulset.yaml" \
-  | sed "s/postgres-seed/postgres-seed-${DRILL_NS}/g" \
-  | kubectl apply -f -
+sed -e "s/name: demo-postgres/name: ${DRILL_NS}/g" \
+  -e "s/namespace: demo-postgres/namespace: ${DRILL_NS}/g" \
+  -e "s/postgres-seed/postgres-seed-${DRILL_NS}/g" \
+  "$ROOT/examples/postgres-statefulset.yaml" | kubectl apply -f -
 
 kubectl -n "$DRILL_NS" rollout status "statefulset/${NAME}" --timeout=180s
 
