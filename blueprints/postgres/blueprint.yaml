@@ -135,7 +135,9 @@ actions:
                 grep -iE 'error|fail|denied|unable|invalid|missing|forbidden|connect' /tmp/kando.out || tail -20 /tmp/kando.out
                 exit 1
               fi
-              gunzip -c -f /tmp/backup.sql.gz | psql -v ON_ERROR_STOP=1 -h "${PGHOST}" -U "${PGUSER}" -d "${PGDATABASE}"
+              gunzip -c -f /tmp/backup.sql.gz \
+                | grep -v -E 'transaction_timeout' \
+                | psql -v ON_ERROR_STOP=1 -w -h "${PGHOST}" -U "${PGUSER}" -d "${PGDATABASE}"
               echo "restore complete"
 
   delete:
