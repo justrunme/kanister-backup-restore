@@ -45,7 +45,7 @@ case "$SCENARIO" in
       echo "empty backupLocation" >&2
       exit 1
     }
-    # Overwrite object with garbage via AWS CLI
+    # Corrupt object via direct file manipulation in s3mock
     kubectl -n "$PROFILE_NS" delete job break-corrupt-artifact --ignore-not-found
     cat <<YAML | kubectl apply -f -
 apiVersion: batch/v1
@@ -67,7 +67,7 @@ spec:
             - name: AWS_SECRET_ACCESS_KEY
               valueFrom: { secretKeyRef: { name: s3-creds, key: secret_key } }
             - name: AWS_ENDPOINT_URL
-              value: "http://seaweedfs.kanister.svc.cluster.local:8333"
+              value: "http://s3mock.kanister.svc.cluster.local:9090"
             - name: AWS_DEFAULT_REGION
               value: "us-east-1"
             - name: OBJECT
