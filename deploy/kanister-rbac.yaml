@@ -1,0 +1,44 @@
+# Extra RBAC the 0.118 Helm chart does not grant: Profile secrets and KubeTask jobs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kanister-operator-drill
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+rules:
+  - apiGroups: [""]
+    resources:
+      - secrets
+      - pods
+      - pods/log
+      - pods/exec
+      - services
+      - configmaps
+      - persistentvolumeclaims
+      - namespaces
+      - events
+    verbs: ["*"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["*"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets", "deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cr.kanister.io"]
+    resources: ["*"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kanister-operator-drill
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kanister-operator-drill
+subjects:
+  - kind: ServiceAccount
+    name: kanister-operator
+    namespace: kanister
