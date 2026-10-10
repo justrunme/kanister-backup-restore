@@ -1,0 +1,42 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: recovery-contract-alerts
+  namespace: kanister
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+    prometheus: kube-prometheus
+spec:
+  groups:
+    - name: recovery-contract
+      interval: 5m
+      rules:
+        - alert: RecoveryEvidenceStale
+          expr: recovery_evidence_age_hours > 24
+          for: 1h
+          labels:
+            severity: warning
+            component: backup
+          annotations:
+            summary: "Recovery evidence is stale"
+            description: "Recovery Contract evidence is {{ $value }} hours old (threshold: 24h). Last drill: scenario={{ $labels.scenario }}"
+        
+        - alert: RecoveryContractUnproved
+          expr: recovery_contract_verdict == 0
+          for: 15m
+          labels:
+            severity: critical
+            component: backup
+          annotations:
+            summary: "Recovery Contract UNPROVED"
+            description: "Recovery Contract verdict is UNPROVED for scenario={{ $labels.scenario }}. Check drill evidence for failure reason."
+        
+        - alert: RecoveryRTOBreach
+          expr: recovery_rto_seconds > 60
+          for: 5m
+          labels:
+            severity: warning
+            component: backup
+          annotations:
+            summary: "Recovery RTO exceeds target"
+            description: "Recovery Time Objective is {{ $value }}s (target: 60s) for scenario={{ $labels.scenario }}"

@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-KANISTER_VERSION="${KANISTER_VERSION:-0.118.0}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=../config/versions.env
+source "$ROOT/config/versions.env"
+
+KANISTER_VERSION="${KANISTER_VERSION:-0.119.0}"
 NS="${KANISTER_NAMESPACE:-kanister}"
 
 kubectl apply -f deploy/namespace.yaml

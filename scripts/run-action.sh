@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROFILE_NS="${PROFILE_NS:-kanister}"
-PROFILE_NAME="${PROFILE_NAME:-minio-profile}"
+PROFILE_NAME="${PROFILE_NAME:-s3-profile}"
 NS="${DEMO_NAMESPACE:-demo-postgres}"
 NAME="${DEMO_STATEFULSET:-postgres}"
 BLUEPRINT="${BLUEPRINT:-postgres-app-aware}"
@@ -54,7 +54,8 @@ if [[ "$ACTION" == "validate" || "$ACTION" == "restore" ]]; then
     exit 1
   fi
   echo "using artifacts from ${FROM}: ${LOC}"
-  ARTIFACTS_BLOCK=$(cat <<EOF
+  ARTIFACTS_BLOCK=$(
+    cat <<EOF
       artifacts:
         cloudObject:
           keyValue:
@@ -62,7 +63,7 @@ if [[ "$ACTION" == "validate" || "$ACTION" == "restore" ]]; then
             namespace: "${NS}"
             name: "${NAME}"
 EOF
-)
+  )
 fi
 
 cat <<YAML | kubectl apply -f -

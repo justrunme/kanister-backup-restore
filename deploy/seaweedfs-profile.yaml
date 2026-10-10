@@ -1,0 +1,188 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kanister
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+    justrunme.com/role: recovery-plane
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: s3-creds
+  namespace: kanister
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+type: Opaque
+stringData:
+  access_key: admin
+  secret_key: admin12345
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seaweedfs
+  namespace: kanister
+  labels:
+    app: seaweedfs
+    app.kubernetes.io/name: kanister-backup-restore
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: seaweedfs
+  template:
+    metadata:
+      labels:
+        app: seaweedfs
+    spec:
+      containers:
+        - name: seaweedfs
+          image: chrislusf/seaweedfs:3.85
+          args:
+            - server
+            - -s3
+            - -s3.config=/etc/seaweedfs/s3.json
+            - -dir=/data
+          env:
+            - name: WEED_MASTER_VOLUME_GROWTH_COPY_1
+              value: "1"
+          ports:
+            - containerPort: 8333
+              name: s3
+            - containerPort: 9333
+              name: master
+            - containerPort: 8080
+              name: volume
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: 9333
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: s3-config
+              mountPath: /etc/seaweedfs
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: s3-config
+          configMap:
+            name: seaweedfs-s3-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: seaweedfs-s3-config
+  namespace: kanister
+data:
+  s3.json: |
+    {
+      "identities": [
+        {
+          "name": "admin",
+          "credentials": [
+            {
+              "accessKey": "admin",
+              "secretKey": "admin12345"
+            }
+          ],
+          "actions": [
+            "Admin",
+            "Read",
+            "Write"
+          ]
+        }
+      ]
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seaweedfs
+  namespace: kanister
+spec:
+  selector:
+    app: seaweedfs
+  ports:
+    - name: s3
+      port: 8333
+      targetPort: 8333
+    - name: master
+      port: 9333
+      targetPort: 9333
+    - name: volume
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seaweedfs-bootstrap-bucket
+  namespace: kanister
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+spec:
+  ttlSecondsAfterFinished: 120
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: aws-cli
+          image: amazon/aws-cli:2.18.20
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: s3-creds
+                  key: access_key
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: s3-creds
+                  key: secret_key
+            - name: AWS_ENDPOINT_URL
+              value: http://seaweedfs.kanister.svc.cluster.local:8333
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -euo pipefail
+              for i in $(seq 1 60); do
+                if aws s3 ls --endpoint-url "$AWS_ENDPOINT_URL" 2>/dev/null; then
+                  break
+                fi
+                sleep 2
+              done
+              aws s3 mb s3://kanister-drills --endpoint-url "$AWS_ENDPOINT_URL" || true
+              aws s3 ls s3://kanister-drills --endpoint-url "$AWS_ENDPOINT_URL"
+              echo "bucket kanister-drills ready"
+---
+apiVersion: cr.kanister.io/v1alpha1
+kind: Profile
+metadata:
+  name: s3-profile
+  namespace: kanister
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+location:
+  type: s3Compliant
+  bucket: kanister-drills
+  endpoint: http://seaweedfs.kanister.svc.cluster.local:8333
+  prefix: drills/
+  region: us-east-1
+credential:
+  type: keyPair
+  keyPair:
+    idField: access_key
+    secretField: secret_key
+    secret:
+      apiVersion: v1
+      kind: Secret
+      name: s3-creds
+      namespace: kanister
+skipSSLVerify: true

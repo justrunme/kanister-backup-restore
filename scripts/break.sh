@@ -23,7 +23,10 @@ Scenarios prove which failure modes make recovery untrustworthy:
 EOF
 }
 
-[[ -n "$SCENARIO" ]] || { usage; exit 1; }
+[[ -n "$SCENARIO" ]] || {
+  usage
+  exit 1
+}
 
 case "$SCENARIO" in
   reset)
@@ -33,10 +36,16 @@ case "$SCENARIO" in
     ;;
   corrupt-artifact)
     FROM="$(kubectl -n "$PROFILE_NS" get actionsets -l justrunme.com/phase=backup --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)"
-    [[ -n "$FROM" ]] || { echo "no backup ActionSet — run backup-drill first" >&2; exit 1; }
+    [[ -n "$FROM" ]] || {
+      echo "no backup ActionSet — run backup-drill first" >&2
+      exit 1
+    }
     LOC="$(kubectl -n "$PROFILE_NS" get "actionset/${FROM}" -o jsonpath='{.status.actions[0].artifacts.cloudObject.keyValue.backupLocation}')"
-    [[ -n "$LOC" ]] || { echo "empty backupLocation" >&2; exit 1; }
-    # Overwrite object with garbage via MinIO mc
+    [[ -n "$LOC" ]] || {
+      echo "empty backupLocation" >&2
+      exit 1
+    }
+    # Overwrite object with garbage via AWS CLI
     kubectl -n "$PROFILE_NS" delete job break-corrupt-artifact --ignore-not-found
     cat <<YAML | kubectl apply -f -
 apiVersion: batch/v1
@@ -50,30 +59,29 @@ spec:
     spec:
       restartPolicy: Never
       containers:
-        - name: mc
-          image: minio/mc:RELEASE.2024-11-17T19-35-46Z
+        - name: aws-cli
+          image: amazon/aws-cli:2.18.20
           env:
-            - name: ACCESS_KEY
-              valueFrom: { secretKeyRef: { name: minio-creds, key: access_key } }
-            - name: SECRET_KEY
-              valueFrom: { secretKeyRef: { name: minio-creds, key: secret_key } }
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: { secretKeyRef: { name: s3-creds, key: access_key } }
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: s3-creds, key: secret_key } }
+            - name: AWS_ENDPOINT_URL
+              value: "http://seaweedfs.kanister.svc.cluster.local:8333"
+            - name: AWS_DEFAULT_REGION
+              value: "us-east-1"
             - name: OBJECT
               value: "drills/${LOC}"
           command: ["/bin/sh","-c"]
           args:
             - |
               set -euo pipefail
-              export MC_HOST_local="http://\${ACCESS_KEY}:\${SECRET_KEY}@minio.kanister.svc.cluster.local:9000"
-              # Path in Profile uses prefix drills/ + backupLocation
-              KEY="kanister-drills/drills/${LOC}"
-              # Prefer exact key layout used by kando (bucket/prefix/path)
               echo "corrupting object for ${LOC}"
-              printf 'NOT-A-GZIP-ARTIFACT' | mc pipe "local/kanister-drills/drills/${LOC}" || \
-                printf 'NOT-A-GZIP-ARTIFACT' | mc pipe "local/kanister-drills/${LOC}"
+              echo 'NOT-A-GZIP-ARTIFACT' | aws s3 cp - "s3://kanister-drills/drills/${LOC}" --endpoint-url "$AWS_ENDPOINT_URL"
               echo "corrupt-artifact applied"
 YAML
     kubectl -n "$PROFILE_NS" wait --for=condition=complete job/break-corrupt-artifact --timeout=120s
-    cat > "$STATE_FILE" <<EOF
+    cat >"$STATE_FILE" <<EOF
 BREAK_SCENARIO=corrupt-artifact
 BREAK_BACKUP_ACTIONSET=${FROM}
 BREAK_BACKUP_LOCATION=${LOC}
@@ -82,7 +90,7 @@ EOF
     echo "scenario corrupt-artifact armed (validate should FAIL)"
     ;;
   wrong-secret)
-    cat > "$STATE_FILE" <<EOF
+    cat >"$STATE_FILE" <<EOF
 BREAK_SCENARIO=wrong-secret
 EXPECTED_BLOCKED_AT=restore
 BREAK_BAD_PASSWORD=definitely-wrong-password
@@ -90,14 +98,14 @@ EOF
     echo "scenario wrong-secret armed (restore auth should FAIL)"
     ;;
   schema-drift)
-    cat > "$STATE_FILE" <<EOF
+    cat >"$STATE_FILE" <<EOF
 BREAK_SCENARIO=schema-drift
 EXPECTED_BLOCKED_AT=verify
 EOF
     echo "scenario schema-drift armed (data verification should FAIL)"
     ;;
   slow-restore)
-    cat > "$STATE_FILE" <<EOF
+    cat >"$STATE_FILE" <<EOF
 BREAK_SCENARIO=slow-restore
 EXPECTED_BLOCKED_AT=rto
 BREAK_RTO_SLEEP_SECONDS=75

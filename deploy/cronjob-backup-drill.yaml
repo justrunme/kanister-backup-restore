@@ -48,7 +48,7 @@ spec:
                           name: postgres
                           namespace: demo-postgres
                         profile:
-                          name: minio-profile
+                          name: s3-profile
                           namespace: kanister
                   YAML
                   echo "created ${NAME}"
