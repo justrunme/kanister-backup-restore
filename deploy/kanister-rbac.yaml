@@ -1,7 +1,35 @@
 # Extra RBAC the 0.118 Helm chart does not grant: Profile secrets and KubeTask jobs.
-# Scoped to namespaced resources where possible; namespaces create/delete only for
-# labeled restore-drill namespaces is not expressible in RBAC, so namespace verbs
-# stay limited to get/list/watch/create/delete (no *).
+# Least privilege:
+# - ClusterRole + ClusterRoleBinding: namespaces lifecycle only (no secrets)
+# - ClusterRole (drill): namespaced resources, bound ONLY via RoleBinding per namespace
+# - Role + RoleBinding in kanister: secrets/pods/jobs/Kanister CRs in the operator ns
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kanister-operator-namespaces
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kanister-operator-namespaces
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kanister-operator-namespaces
+subjects:
+  - kind: ServiceAccount
+    name: kanister-operator
+    namespace: kanister
+---
+# Drill/demo namespace permissions. Never ClusterRoleBind this role.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -20,9 +48,6 @@ rules:
       - persistentvolumeclaims
       - events
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["namespaces"]
-    verbs: ["get", "list", "watch", "create", "delete"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -33,15 +58,49 @@ rules:
     resources: ["blueprints", "profiles", "actionsets", "actionsets/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
+# Kanister namespace Role: secrets and Kanister CRs stay namespaced.
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: Role
 metadata:
   name: kanister-operator-drill
+  namespace: kanister
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+rules:
+  - apiGroups: [""]
+    resources:
+      - secrets
+      - pods
+      - pods/log
+      - pods/exec
+      - services
+      - configmaps
+      - persistentvolumeclaims
+      - events
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets", "deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cr.kanister.io"]
+    resources: ["blueprints", "profiles", "actionsets", "actionsets/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kanister-operator-drill
+  namespace: kanister
   labels:
     app.kubernetes.io/name: kanister-backup-restore
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: kanister-operator-drill
 subjects:
   - kind: ServiceAccount

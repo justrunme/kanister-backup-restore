@@ -324,6 +324,44 @@ for b in cluster_bindings:
 print("✓ operator RBAC + component evidence checks")
 PY
 
+echo "== kanister-operator RBAC least privilege =="
+python3 - <<'PY' || fail=1
+from pathlib import Path
+import re
+text = Path("deploy/kanister-rbac.yaml").read_text()
+docs = [d.strip() for d in text.split("---") if d.strip()]
+cluster_roles = {}
+cluster_bindings = []
+for d in docs:
+    kind_m = re.search(r"^kind:\s*(\S+)", d, re.M)
+    if not kind_m:
+        continue
+    kind = kind_m.group(1)
+    meta = re.search(r"metadata:\s*\n\s*name:\s*(\S+)", d)
+    name = meta.group(1) if meta else ""
+    if kind == "ClusterRole":
+        cluster_roles[name] = d
+    elif kind == "ClusterRoleBinding":
+        cluster_bindings.append(d)
+for b in cluster_bindings:
+    rm = re.search(r"roleRef:\s*\n(?:\s+.+\n)*?\s+name:\s*(\S+)", b)
+    if not rm:
+        raise SystemExit("ClusterRoleBinding missing roleRef name in kanister-rbac.yaml")
+    role_name = rm.group(1)
+    body = cluster_roles.get(role_name, "")
+    rules = body.split("rules:", 1)[-1] if "rules:" in body else body
+    if re.search(r"\bsecrets\b", rules):
+        raise SystemExit(f"ClusterRoleBinding must not grant secrets via {role_name}")
+if "kind: Role" not in text:
+    raise SystemExit("namespaced Role missing from kanister-rbac.yaml")
+# Legacy name: ClusterRoleBinding must not be named kanister-operator-drill anymore
+for b in cluster_bindings:
+    meta = re.search(r"metadata:\s*\n\s*name:\s*(\S+)", b)
+    if meta and meta.group(1) == "kanister-operator-drill":
+        raise SystemExit("legacy ClusterRoleBinding kanister-operator-drill still present")
+print("✓ kanister-operator RBAC checks")
+PY
+
 if [[ "$fail" -ne 0 ]]; then
   echo "ci failed" >&2
   exit 1
