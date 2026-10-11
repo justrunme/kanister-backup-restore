@@ -362,7 +362,6 @@ for b in cluster_bindings:
 print("✓ kanister-operator RBAC checks")
 PY
 
-
 if [[ "$fail" -ne 0 ]]; then
   echo "ci failed" >&2
   exit 1
