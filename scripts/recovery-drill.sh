@@ -85,11 +85,9 @@ insert_proof_marker() {
   MARKER_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   MARKER_NOTE="drill-${DRILL_ID}-${MARKER_UUID}-${MARKER_TS}"
   echo "-- protect: writing proof marker ${MARKER_NOTE}"
-  # Single psql session: ensure schema, insert marker, emit row_count:checksum.
-  # Avoid '|' in SQL (shell/pipe ambiguity through kubectl exec).
-  local stats
-  stats="$(kubectl -n "$DEMO_NS" exec "sts/${DEMO_STS}" -- \
-    psql -U postgres -d app -v ON_ERROR_STOP=1 -tAc "
+  # Ensure schema + insert marker (quiet: no CREATE/INSERT command tags on stdout).
+  kubectl -n "$DEMO_NS" exec "sts/${DEMO_STS}" -- \
+    psql -U postgres -d app -v ON_ERROR_STOP=1 -q -c "
 CREATE TABLE IF NOT EXISTS recovery_markers (
   id SERIAL PRIMARY KEY,
   note TEXT NOT NULL,
@@ -97,16 +95,20 @@ CREATE TABLE IF NOT EXISTS recovery_markers (
 );
 INSERT INTO recovery_markers (note, created_at)
 VALUES ('${MARKER_NOTE}', TIMESTAMPTZ '${MARKER_TS}');
-SELECT COUNT(*)::text || ':' || md5(COALESCE(string_agg(note, chr(44) ORDER BY id), ''))
-FROM recovery_markers;
-")"
+" >/dev/null
+
+  # Separate tuples-only SELECT so stdout is only "rows:checksum".
+  local stats
+  stats="$(kubectl -n "$DEMO_NS" exec "sts/${DEMO_STS}" -- \
+    psql -U postgres -d app -v ON_ERROR_STOP=1 -tAqc \
+    "SELECT COUNT(*)::text || ':' || md5(COALESCE(string_agg(note, chr(44) ORDER BY id), '')) FROM recovery_markers;")"
   stats="$(echo "$stats" | tr -d '[:space:]')"
   SOURCE_ROW_COUNT="${stats%%:*}"
   SOURCE_CHECKSUM="${stats#*:}"
-  [[ -n "$SOURCE_ROW_COUNT" && -n "$SOURCE_CHECKSUM" && "$SOURCE_ROW_COUNT" != "$SOURCE_CHECKSUM" ]] || {
+  if ! [[ "$SOURCE_ROW_COUNT" =~ ^[0-9]+$ && -n "$SOURCE_CHECKSUM" && "$SOURCE_CHECKSUM" =~ ^[0-9a-f]{32}$ ]]; then
     echo "failed to collect source proof stats (raw=${stats})" >&2
     exit 1
-  }
+  fi
   SOURCE_SCHEMA_HASH="$(kubectl -n "$DEMO_NS" exec "sts/${DEMO_STS}" -- \
     sh -c "pg_dump -U postgres -d app --schema-only 2>/dev/null | sha256sum | awk '{print \$1}'" | tr -d '[:space:]')"
 
