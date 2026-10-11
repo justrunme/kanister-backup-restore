@@ -11,7 +11,7 @@ do not represent large production datasets or enterprise backup fabrics.**
 
 | Claim | Status | Scenario + environment | Real limits | Proof link | Negative tests |
 | --- | --- | --- | --- | --- | --- |
-| Happy-path PROTECT → VALIDATE → RESTORE → PROVE (PROVED) | Tested in CI | Recovery Drill workflow; kind **v0.33.0**; matrix **k8s v1.37.0** and **v1.36.4**; MinIO object store; Postgres blueprint | Single-node kind; tiny demo DB; RTO is restore ActionSet duration in that lab — **not** warehouse-scale RTO | Documented run [38118145078](https://github.com/justrunme/kanister-backup-restore/actions/runs/38118145078) (results.md): RTO **6 s** / **5 s**, RPO **12 s** / **11 s**, verdict **PROVED**; artifacts `recovery-evidence-k8s-v1.37.0` / `…v1.36.4`; v1.37 marker `ad654415-eb35-4594-992f-c795c78fb617`, backup sha256 `6a8db462604d015d03548c662db2333c028fe9538e1f5a7fce113e13e0cb0aab`. Post-merge main confirmation: [38121276465](https://github.com/justrunme/kanister-backup-restore/actions/runs/38121276465) · SHA `3ad805c55662b93f821a9753a1c76ddec912918f` (happy-path PROVED; artifact RTO example **5 s** on v1.37.0) | Contract fails closed on failed clauses |
+| Happy-path PROTECT → VALIDATE → RESTORE → PROVE (PROVED) | Tested in CI | Recovery Drill workflow; kind matrix **k8s v1.37.0** and **v1.36.4**; Postgres + S3 (SeaweedFS) linked recovery point | Single-node kind; tiny demo DB+objects; RTO is restore+prove duration in that lab — **not** warehouse-scale RTO | Documented run [38131463362](https://github.com/justrunme/kanister-backup-restore/actions/runs/38131463362) ([docs/results.md](results.md) / [results.json](results.json)): RTO **8 s** / **8 s**, component skew **13 s** / **9 s**, verdict **PROVED**, components `postgres`+`s3` true; RP `rp-20261011T101959Z-878b148bde` / `rp-20261011T102003Z-dccc3c2681`. Post-merge Recovery Drill: [38133272732](https://github.com/justrunme/kanister-backup-restore/actions/runs/38133272732) | Contract fails closed on failed clauses; delete/corrupt/mismatch drills → **UNPROVED** |
 | Artifact integrity (sha256 + scratch SQL) | Tested in CI | Same drills | Lab object in MinIO | Same runs/artifacts; corrupt path below | `corrupt-artifact` → **UNPROVED** / `artifact_integrity`, blocked at `validate` |
 | Unique marker + checksum data verification after restore | Tested in CI | Happy-path proof marker UUID in evidence JSON | Proves the restored row, not full logical replication lag across regions | results.json marker/restore_actionset fields; latest artifacts include `proof.marker_uuid` | `noop-restore` → **UNPROVED** / `data_verification` (ActionSet completed without applying expected data) |
 | Fail-closed evaluator / contract gating | Tested in CI | Evaluator unit tests in CI + failure drills in Recovery Drill | Contract JSON/YAML as configured (`config/recovery-contract.*`) | CI + Recovery Drill on main after #17 | UNPROVED verdicts for noop-restore and corrupt-artifact |
@@ -21,7 +21,7 @@ do not represent large production datasets or enterprise backup fabrics.**
 
 - Large production dataset RTO/RPO (explicitly out of scope for kind numbers)
 - Cross-region DR, backup immutability compliance audits, or vendor Kanister SaaS SLAs
-- Treating ~5–16 s kind RTO as a contractual enterprise target
+- Treating ~8 s kind RTO as a contractual enterprise target
 
 ## How to reproduce
 
