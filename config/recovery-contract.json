@@ -50,8 +50,8 @@
       "expected_reason": "cross_component_consistency"
     },
     "mismatched-recovery-points": {
-      "description": "Restore Postgres from RP-A and S3 from RP-B",
-      "expected_reason": "cross_component_consistency"
+      "description": "Restore Postgres from RP-A and S3 from RP-B so the app cannot read restored objects (data_verification) / components diverge",
+      "expected_reason": "data_verification"
     }
   }
 }
