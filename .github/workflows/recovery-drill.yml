@@ -187,9 +187,17 @@ jobs:
       - name: Verify UNPROVED mismatched-recovery-points
         if: matrix.k8s == 'v1.37.0'
         run: |
+          set -euo pipefail
           grep -q '"verdict": "UNPROVED"' .evidence/recovery-verdict.json
-          grep -q '"reason": "cross_component_consistency"' .evidence/recovery-verdict.json
-          echo "✓ mismatched-recovery-points → UNPROVED consistency"
+          grep -q '"reason": "data_verification"' .evidence/recovery-verdict.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          ev = json.loads(Path(".evidence/drill-latest.json").read_text())
+          comps = ev.get("components") or {}
+          assert comps.get("postgres") is False or comps.get("s3") is False, comps
+          print("✓ mismatched-recovery-points → UNPROVED data_verification; component False proven")
+          PY
 
       - name: Dump cluster on failure
         if: failure()
