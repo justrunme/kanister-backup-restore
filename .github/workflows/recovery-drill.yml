@@ -108,6 +108,23 @@ jobs:
           kubectl get recoverydrills -A
           echo "✓ Application Recovery Contract PROVED"
 
+      - name: Assert kanister-operator cannot read secrets in unrelated namespace
+        run: |
+          set -euo pipefail
+          # Negative authz: cluster-wide secrets must NOT be granted
+          if kubectl auth can-i get secrets --namespace default \
+              --as=system:serviceaccount:kanister:kanister-operator; then
+            echo "ERROR: kanister-operator can get secrets in default (cluster-wide secrets leak)" >&2
+            exit 1
+          fi
+          # Positive: can get secrets in kanister (namespaced Role)
+          kubectl auth can-i get secrets --namespace kanister \
+            --as=system:serviceaccount:kanister:kanister-operator
+          # Positive: can get secrets in demo-postgres after RoleBinding
+          kubectl auth can-i get secrets --namespace demo-postgres \
+            --as=system:serviceaccount:kanister:kanister-operator
+          echo "✓ kanister-operator secrets scoped (denied in default, allowed in kanister+demo-postgres)"
+
       - name: Export metrics
         run: |
           ./scripts/export-metrics.sh
