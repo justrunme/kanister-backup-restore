@@ -50,17 +50,19 @@ gen = data["generation"]
 print("BEGIN;")
 print(f"INSERT INTO app_manifest (id, generation, updated_at) VALUES (1, {gen}, now())")
 print(f"  ON CONFLICT (id) DO UPDATE SET generation = EXCLUDED.generation, updated_at = now();")
+# Replace prior generations so app_objects is a single logical version.
+print("DELETE FROM app_objects;")
 for o in data["objects"]:
     key = o["object_key"].replace("'", "''")
     sha = o["sha256"].replace("'", "''")
     print(
         "INSERT INTO app_objects (object_key, sha256, generation) VALUES "
-        f"('{key}', '{sha}', {gen}) "
-        "ON CONFLICT (object_key) DO UPDATE SET sha256 = EXCLUDED.sha256, generation = EXCLUDED.generation;"
+        f"('{key}', '{sha}', {gen});"
     )
 print("COMMIT;")
 print(f"SELECT generation FROM app_manifest WHERE id = 1;")
-print(f"SELECT COUNT(*) FROM app_objects WHERE generation = {gen};")
+print(f"SELECT COUNT(*) FROM app_objects;")
+print(f"SELECT COUNT(DISTINCT generation) FROM app_objects;")
 PY
 
 echo "$GENERATION" >"$EVIDENCE_DIR/linked-generation"

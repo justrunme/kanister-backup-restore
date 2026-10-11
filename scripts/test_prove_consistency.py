@@ -113,3 +113,32 @@ def test_skew_breach_fails():
     )
     assert result["ok"] is False
     assert any("skew" in e for e in result["errors"])
+
+def test_generation_drift_fails():
+    body_a = b"a"
+    body_b = b"b"
+    sha_a = hashlib.sha256(body_a).hexdigest()
+    sha_b = hashlib.sha256(body_b).hexdigest()
+    key_a = "app-data/a.bin"
+    key_b = "app-data/b.bin"
+    result = prove(
+        pg_rows=[
+            {"object_key": key_a, "sha256": sha_a, "generation": 1},
+            {"object_key": key_b, "sha256": sha_b, "generation": 2},
+        ],
+        pg_generation=2,
+        restored_objects={key_a: body_a, key_b: body_b},
+        rp_manifest=_manifest(
+            2,
+            [
+                {"object_key": key_a, "sha256": sha_a},
+                {"object_key": key_b, "sha256": sha_b},
+            ],
+            "2026-10-11T12:00:00Z",
+            "2026-10-11T12:00:00Z",
+        ),
+        skew_max_seconds=60,
+    )
+    assert result["ok"] is False
+    assert any("generation drift" in e for e in result["errors"])
+

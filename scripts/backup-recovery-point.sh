@@ -28,7 +28,13 @@ kubectl -n "$DEMO_NS" exec "sts/${DEMO_STS}" -- \
   "SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM (
      SELECT object_key, sha256, generation FROM app_objects ORDER BY id
    ) t;" | tr -d '[:space:]' >"$ROWS_JSON"
-python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert isinstance(d,list) and d; print(f"rows ok count={len(d)}")' "$ROWS_JSON"
+python3 -c 'import json,sys
+rows=json.load(open(sys.argv[1])); gen=int(sys.argv[2])
+assert isinstance(rows, list) and rows, "app_objects empty"
+gens={int(r["generation"]) for r in rows}
+assert gens == {gen}, f"app_objects generation drift before RP: {sorted(gens)} manifest={gen}"
+print(f"rows ok count={len(rows)} generation={gen}")
+' "$ROWS_JSON" "$GENERATION"
 
 PG_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "-- backup postgres via Kanister"
