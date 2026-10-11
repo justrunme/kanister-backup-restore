@@ -167,6 +167,7 @@ print(cfg.get("failure_scenarios",{}).get(sys.argv[2],{}).get("expected_reason",
 
 # --- PROTECT ---
 kubectl apply -f "$ROOT/examples/postgres-statefulset.yaml" >/dev/null
+"$ROOT/scripts/bind-drill-rbac.sh" "$DEMO_NS" >/dev/null
 kubectl -n "$DEMO_NS" rollout status "statefulset/${DEMO_STS}" --timeout=180s
 kubectl -n "$DEMO_NS" wait --for=condition=complete job/postgres-seed --timeout=180s || true
 "$ROOT/scripts/seed-linked-app.sh"
