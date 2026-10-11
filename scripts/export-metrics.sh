@@ -33,6 +33,7 @@ rto_seconds = metrics.get("rto_seconds")
 evidence_age_hours = metrics.get("evidence_age_hours", 0)
 drill_id = ev.get("drill_id", 0)
 scenario = ev.get("scenario", "unknown")
+generated = ev.get("generated_at") or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 lines = [
     "# HELP recovery_contract_verdict Recovery Contract verdict (1=PROVED, 0=UNPROVED)",
@@ -49,10 +50,25 @@ if rto_seconds is not None:
         "",
     ]
 
+# last_success_timestamp: set when PROVED, else 0
+last_success = 0
+if verdict == "PROVED":
+    try:
+        raw = generated
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        last_success = int(datetime.fromisoformat(raw).timestamp())
+    except Exception:
+        last_success = int(datetime.now(timezone.utc).timestamp())
+
 lines += [
     "# HELP recovery_evidence_age_hours Age of recovery evidence in hours",
     "# TYPE recovery_evidence_age_hours gauge",
     f'recovery_evidence_age_hours{{scenario="{scenario}"}} {evidence_age_hours}',
+    "",
+    "# HELP recovery_last_success_timestamp Unix time of last PROVED drill",
+    "# TYPE recovery_last_success_timestamp gauge",
+    f'recovery_last_success_timestamp{{scenario="{scenario}"}} {last_success}',
     "",
     "# HELP recovery_drill_id Sequential drill identifier",
     "# TYPE recovery_drill_id counter",

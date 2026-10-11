@@ -1,0 +1,80 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: recoverycontracts.recovery.justrunme.com
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+spec:
+  group: recovery.justrunme.com
+  names:
+    kind: RecoveryContract
+    listKind: RecoveryContractList
+    plural: recoverycontracts
+    singular: recoverycontract
+    shortNames: [rcontract]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [targets]
+              properties:
+                targets:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [component, kind]
+                    properties:
+                      component:
+                        type: string
+                        enum: [postgres, s3]
+                      kind:
+                        type: string
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                rtoSecondsMax:
+                  type: integer
+                  minimum: 1
+                  default: 60
+                rpoSecondsMax:
+                  type: integer
+                  minimum: 0
+                  default: 300
+                evidenceTTLHours:
+                  type: integer
+                  minimum: 1
+                  default: 24
+                recoveryPointSkewSecondsMax:
+                  type: integer
+                  minimum: 0
+                  default: 60
+                schedule:
+                  type: string
+                  description: Cron schedule for automated drills (optional)
+                  default: ""
+            status:
+              type: object
+              properties:
+                observedGeneration:
+                  type: integer
+                active:
+                  type: boolean
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: RTO
+          type: integer
+          jsonPath: .spec.rtoSecondsMax
+        - name: Schedule
+          type: string
+          jsonPath: .spec.schedule

@@ -11,10 +11,15 @@ for f in \
   docs/assets/recovery-lifecycle.svg \
   blueprints/postgres/blueprint.yaml \
   blueprints/postgres/blueprint-noop-restore.yaml \
-  examples/postgres-restore-target.yaml \
-  scripts/recovery-drill.sh scripts/break.sh scripts/evaluate-contract.sh \
-  scripts/evaluate_contract.py scripts/failure-drill.sh scripts/prune-backups.sh \
-  deploy/seaweedfs-profile.yaml examples/postgres-statefulset.yaml; do
+  examples/postgres-restore-target.yaml examples/linked-app/schema.sql \
+  examples/recovery-contract.yaml \
+  scripts/recovery-drill.sh scripts/app-recovery-drill.sh scripts/break.sh \
+  scripts/evaluate-contract.sh scripts/evaluate_contract.py scripts/prove_consistency.py \
+  scripts/failure-drill.sh scripts/prune-backups.sh scripts/seed-linked-app.sh \
+  scripts/backup-recovery-point.sh \
+  deploy/seaweedfs-profile.yaml deploy/drill-quota.yaml \
+  deploy/crds/recoverycontract-crd.yaml deploy/crds/recoverydrill-crd.yaml \
+  operator/controller.py examples/postgres-statefulset.yaml; do
   [[ -f "$f" ]] || {
     echo "missing $f" >&2
     fail=1
@@ -28,10 +33,17 @@ grep -q 'Restore should be proved, not assumed' README.md || fail=1
 grep -q 'PROVED' README.md || fail=1
 grep -q 'UNPROVED' README.md || fail=1
 grep -q 'noop-restore' README.md || fail=1
+grep -q 'cross_component_consistency\|Cross-component consistency\|delete-s3-object' README.md || fail=1
+grep -q 'Solr' README.md || fail=1
 ! grep -q 'Confidence.*100' README.md || {
   echo "percentage score still in README" >&2
   fail=1
 }
+# README media/badges must remain
+grep -q 'docs/assets/recovery-lifecycle.svg' README.md || fail=1
+grep -q 'badge.svg' README.md || fail=1
+[[ -f docs/assets/recovery-drill.svg ]] || fail=1
+[[ -f docs/assets/recovery-drill.cast ]] || fail=1
 
 echo "== no hardcoded S3 secrets in blueprints =="
 if grep -REn 'admin12345|PROFILE_JSON=.*Secret' blueprints/postgres/blueprint.yaml blueprints/postgres/blueprint-noop-restore.yaml; then
@@ -55,13 +67,17 @@ echo "== contract schema =="
 python3 - <<'PY' || fail=1
 import json
 from pathlib import Path
-c=json.loads(Path("config/recovery-contract.json").read_text())["contract"]
-for k in ("artifact_integrity","isolated_restore","application_ready","data_verification","rto_seconds_max","evidence_freshness_hours_max"):
+cfg=json.loads(Path("config/recovery-contract.json").read_text())
+c=cfg["contract"]
+for k in ("artifact_integrity","isolated_restore","application_ready","data_verification","cross_component_consistency","rto_seconds_max","evidence_freshness_hours_max","recovery_point_skew_seconds_max"):
     assert k in c, k
 assert c["rto_seconds_max"] == 60
-cfg=json.loads(Path("config/recovery-contract.json").read_text())
-assert "noop-restore" in cfg["failure_scenarios"]
-assert cfg["failure_scenarios"]["noop-restore"]["expected_reason"] == "data_verification"
+assert c["cross_component_consistency"] == "required"
+assert "postgres" in cfg["components"] and "s3" in cfg["components"]
+assert "solr" in cfg.get("future", [])
+for s in ("noop-restore","delete-s3-object","corrupt-s3-object","mismatched-recovery-points"):
+    assert s in cfg["failure_scenarios"], s
+assert cfg["failure_scenarios"]["delete-s3-object"]["expected_reason"] == "cross_component_consistency"
 assert "weights" not in cfg
 print("contract ok", c)
 PY
@@ -228,12 +244,11 @@ grep -q 'backup' /tmp/rc-false.out || fail=1
 }
 rm -rf .evidence-ci
 
-echo "== evaluate_contract unit tests =="
-if python3 -m pytest -q scripts/test_evaluate_contract.py; then
+echo "== evaluate_contract + prove_consistency unit tests =="
+if python3 -m pytest -q scripts/test_evaluate_contract.py scripts/test_prove_consistency.py; then
   :
 else
-  # pytest may be missing locally; run a minimal import smoke instead
-  if ! python3 -c 'import sys; sys.path.insert(0,"scripts"); from evaluate_contract import evaluate; print("import ok")'; then
+  if ! python3 -c 'import sys; sys.path.insert(0,"scripts"); from evaluate_contract import evaluate; from prove_consistency import prove; print("import ok")'; then
     fail=1
   else
     echo "pytest not available; import smoke only" >&2
@@ -241,13 +256,14 @@ else
 fi
 
 echo "== failure scenarios =="
-for s in corrupt-artifact wrong-secret schema-drift slow-restore noop-restore; do
+for s in corrupt-artifact wrong-secret schema-drift slow-restore noop-restore delete-s3-object corrupt-s3-object mismatched-recovery-points; do
   grep -q "$s" scripts/break.sh || {
     echo "missing scenario $s" >&2
     fail=1
   }
 done
 grep -q 'failure-drill' Makefile || fail=1
+grep -q 'app-recovery-drill' Makefile || fail=1
 
 echo "== kando still present =="
 grep -q 'kando location push' blueprints/postgres/blueprint.yaml || fail=1

@@ -4,8 +4,13 @@
 # Usage:
 #   s3-object.sh ensure-bucket
 #   s3-object.sh put <object-key> <file>
+#   s3-object.sh get <object-key> <file>
+#   s3-object.sh head <object-key>
+#   s3-object.sh delete <object-key>
+#   s3-object.sh copy <src-key> <dst-key>
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 NS="${KANISTER_NAMESPACE:-kanister}"
 SVC="${S3_SERVICE:-seaweedfs}"
 SVC_PORT="${S3_SERVICE_PORT:-8333}"
@@ -17,11 +22,13 @@ REGION="${S3_REGION:-us-east-1}"
 ACTION="${1:-}"
 
 usage() {
-  echo "Usage: $0 ensure-bucket | put <object-key> <file>" >&2
+  echo "Usage: $0 ensure-bucket | put <key> <file> | get <key> <file> | head <key> | delete <key> | copy <src> <dst>" >&2
   exit 1
 }
 
 [[ -n "$ACTION" ]] || usage
+
+export S3_LOCAL_PORT="$LOCAL_PORT" S3_BUCKET="$BUCKET" S3_ACCESS_KEY="$ACCESS_KEY" S3_SECRET_KEY="$SECRET_KEY" S3_REGION="$REGION"
 
 PF_PID=""
 cleanup() {
@@ -60,46 +67,23 @@ PY
   return 1
 }
 
-s3_request() {
-  local method="$1" key="${2:-}" body_file="${3:-}"
-  python3 - "$method" "$key" "$body_file" "$LOCAL_PORT" "$BUCKET" "$ACCESS_KEY" "$SECRET_KEY" "$REGION" <<'PY'
+s3_request_bucket() {
+  local method="$1"
+  python3 - "$method" "$LOCAL_PORT" "$BUCKET" "$ACCESS_KEY" "$SECRET_KEY" "$REGION" <<'PY'
 import hashlib, hmac, datetime, sys, urllib.request, urllib.error
-
-method, key, body_file, port, bucket, access, secret, region = sys.argv[1:9]
+method, port, bucket, access, secret, region = sys.argv[1:7]
 host = f"127.0.0.1:{port}"
-if key:
-    if not key.startswith("/"):
-        key = "/" + key
-    uri = f"/{bucket}{key}"
-else:
-    uri = f"/{bucket}"
+uri = f"/{bucket}"
 body = b""
-if body_file:
-    with open(body_file, "rb") as f:
-        body = f.read()
-
 now = datetime.datetime.now(datetime.timezone.utc)
 amzdate = now.strftime("%Y%m%dT%H%M%SZ")
 datestamp = now.strftime("%Y%m%d")
 payload_hash = hashlib.sha256(body).hexdigest()
-canonical_headers = (
-    f"host:{host}\n"
-    f"x-amz-content-sha256:{payload_hash}\n"
-    f"x-amz-date:{amzdate}\n"
-)
+canonical_headers = f"host:{host}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amzdate}\n"
 signed_headers = "host;x-amz-content-sha256;x-amz-date"
-canonical_request = "\n".join(
-    [method, uri, "", canonical_headers, signed_headers, payload_hash]
-)
+canonical_request = "\n".join([method, uri, "", canonical_headers, signed_headers, payload_hash])
 scope = f"{datestamp}/{region}/s3/aws4_request"
-string_to_sign = "\n".join(
-    [
-        "AWS4-HMAC-SHA256",
-        amzdate,
-        scope,
-        hashlib.sha256(canonical_request.encode()).hexdigest(),
-    ]
-)
+string_to_sign = "\n".join(["AWS4-HMAC-SHA256", amzdate, scope, hashlib.sha256(canonical_request.encode()).hexdigest()])
 
 def _sign(key, msg):
     return hmac.new(key, msg.encode() if isinstance(msg, str) else msg, hashlib.sha256).digest()
@@ -109,20 +93,12 @@ k = _sign(k, region)
 k = _sign(k, "s3")
 k = _sign(k, "aws4_request")
 signature = hmac.new(k, string_to_sign.encode(), hashlib.sha256).hexdigest()
-auth = (
-    f"AWS4-HMAC-SHA256 Credential={access}/{scope}, "
-    f"SignedHeaders={signed_headers}, Signature={signature}"
-)
+auth = f"AWS4-HMAC-SHA256 Credential={access}/{scope}, SignedHeaders={signed_headers}, Signature={signature}"
 req = urllib.request.Request(
     f"http://{host}{uri}",
-    data=body if method in ("PUT", "POST") else None,
+    data=None,
     method=method,
-    headers={
-        "Host": host,
-        "x-amz-date": amzdate,
-        "x-amz-content-sha256": payload_hash,
-        "Authorization": auth,
-    },
+    headers={"Host": host, "x-amz-date": amzdate, "x-amz-content-sha256": payload_hash, "Authorization": auth},
 )
 try:
     with urllib.request.urlopen(req, timeout=15) as resp:
@@ -141,16 +117,13 @@ start_port_forward
 
 case "$ACTION" in
   ensure-bucket)
-    s3_request PUT
-    s3_request HEAD
+    s3_request_bucket PUT
+    s3_request_bucket HEAD
     echo "bucket ${BUCKET} ready (HeadBucket ok)"
     ;;
-  put)
-    KEY="${2:-}"
-    FILE="${3:-}"
-    [[ -n "$KEY" && -n "$FILE" && -f "$FILE" ]] || usage
-    s3_request PUT "$KEY" "$FILE"
-    echo "put s3://${BUCKET}/${KEY}"
+  put | get | head | delete | copy)
+    shift
+    python3 "$ROOT/scripts/s3-client.py" "$ACTION" "$@"
     ;;
   *)
     usage
