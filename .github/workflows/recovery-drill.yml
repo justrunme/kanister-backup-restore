@@ -12,7 +12,7 @@ jobs:
     name: Shellcheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       
       - name: Install shellcheck
         run: |
@@ -28,7 +28,7 @@ jobs:
     name: Shell format check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       
       - name: Install shfmt
         run: |
@@ -50,7 +50,7 @@ jobs:
           - v1.37.0
           - v1.36.4
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       
       - name: Install kind
         run: |
@@ -128,7 +128,7 @@ jobs:
       
       - name: Upload evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: recovery-evidence-k8s-${{ matrix.k8s }}
           path: /tmp/drill-out
