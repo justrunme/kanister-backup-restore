@@ -16,14 +16,18 @@ Case study: [Kanister Backup & Restore](https://justrunme.com/cases/kanister-bac
 
 ## What it does
 
-- Runs a Kanister-based drill: PROTECT → VALIDATE → RESTORE → PROVE on Kind with MinIO
-- Evaluates a Recovery Contract (artifact integrity, isolated restore, app ready, RTO/freshness)
-- Emits binary PROVED / UNPROVED verdicts with evidence under `.evidence/`
+- Multi-service Application Recovery Contract for **Postgres + S3** (SeaweedFS/MinIO) on Kind
+- Linked demo state: DB rows reference object keys with sha256 + generation under one logical recovery point
+- PROVE requires component restore **and** cross-component consistency (objects exist, checksums match, generation aligned, bounded RP skew)
+- CRDs `RecoveryContract` / `RecoveryDrill` with a lightweight kopf operator; drills run in isolated namespaces with ResourceQuota/LimitRange
+- Binary PROVED / UNPROVED verdicts + Prometheus metrics (`verdict`, `rto_seconds`, `last_success_timestamp`)
+
+Solr is out of scope for now (listed under `future` in the contract).
 
 ## Why
 
 - A successful backup job is not proof of application recoverability
-- Volume snapshots preserve bytes; recovery needs ordered restore, validation, and measured RTO
+- Restoring Postgres alone while losing referenced objects is still an application outage
 
 ## Quickstart
 
@@ -37,39 +41,27 @@ make full-drill
 flowchart LR
   Kind[Kind cluster] --> Kan[Kanister operator]
   Kan --> BP[blueprints/postgres]
-  BP --> MinIO[profiles / MinIO]
-  Scripts[make recovery-drill] --> Protect[PROTECT ActionSet]
-  Protect --> Validate[VALIDATE artifact]
-  Validate --> Restore[RESTORE isolated ns]
-  Restore --> Prove[PROVE contract evidence]
-  CI[.github/workflows/ci.yml] --> Drill[recovery-drill.yml]
+  BP --> S3[SeaweedFS Profile]
+  App[linked Postgres+S3 state] --> RP[recovery point]
+  RP --> Protect[PROTECT]
+  Protect --> Validate[VALIDATE]
+  Validate --> Restore[RESTORE isolated ns + quota]
+  Restore --> Prove[PROVE consistency]
+  CRD[RecoveryContract / RecoveryDrill] --> Op[kopf operator]
 ```
 
 ## Recovery Contract
 
 ```text
 RECOVERY CONTRACT
-Artifact integrity       required
-Isolated restore         required
-Application ready        required
-Data verification        required
-RTO                      < 60s
-Evidence freshness       < 24h
-```
-
-After `make full-drill` (or `make recovery-drill`):
-
-```text
-RECOVERY DRILL #0042
-Backup                 PASS
-Artifact integrity     PASS
-Isolated restore       PASS
-Application ready      PASS
-Recovery marker        PASS
-RPO                     3m 41s
-RTO                       38s
-Evidence age              0m
-RECOVERY                 PROVED
+Artifact integrity              required
+Isolated restore                required
+Application ready               required
+Data verification               required
+Cross-component consistency     required
+RTO                             < 60s
+Evidence freshness              < 24h
+Recovery-point skew             < 60s
 ```
 
 Evidence: `.evidence/recovery-verdict.md` + `.evidence/recovery-verdict.json`
@@ -98,30 +90,20 @@ make full-drill
 Show which failure modes make a backup untrustworthy:
 
 ```bash
-make failure-drill SCENARIO=corrupt-artifact
-make failure-drill SCENARIO=wrong-secret
-make failure-drill SCENARIO=schema-drift
-make failure-drill SCENARIO=slow-restore
+make failure-drill SCENARIO=delete-s3-object
+make failure-drill SCENARIO=corrupt-s3-object
+make failure-drill SCENARIO=mismatched-recovery-points
 make failure-drill SCENARIO=noop-restore
-```
-
-Example (corrupt artifact):
-
-```text
-Backup                 PASS
-Artifact integrity     FAIL
-Isolated restore       BLOCKED
-RECOVERY               UNPROVED
-Reason                 artifact_integrity
+make failure-drill SCENARIO=corrupt-artifact
 ```
 
 | Scenario | Reason | What you learn |
 |---|---|---|
+| `delete-s3-object` | `cross_component_consistency` | Postgres restore ≠ application recoverability |
+| `corrupt-s3-object` | `cross_component_consistency` | Checksums must match across components |
+| `mismatched-recovery-points` | `cross_component_consistency` | One logical RP required |
 | `corrupt-artifact` | `artifact_integrity` | Creation ≠ recoverability |
-| `wrong-secret` | `isolated_restore` | Credentials are part of the contract |
-| `schema-drift` | `data_verification` | Bytes restored ≠ application verified |
-| `slow-restore` | `rto` | Success without RTO still UNPROVED |
-| `noop-restore` | `data_verification` | A completed restore ActionSet is not proof without the pre-backup marker |
+| `noop-restore` | `data_verification` | A completed ActionSet is not proof |
 
 ---
 

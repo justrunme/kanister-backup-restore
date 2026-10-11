@@ -1,0 +1,50 @@
+# Recovery Contract operator (kopf).
+# Run locally against a cluster:
+#   pip install -r operator/requirements.txt
+#   RECOVERY_ROOT=$PWD kopf run operator/controller.py --standalone -n kanister
+# Or apply RBAC below and schedule drills via RecoveryDrill CRs from CI/CronJob.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: recovery-contract-operator
+  namespace: kanister
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: recovery-contract-operator
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+rules:
+  - apiGroups: ["recovery.justrunme.com"]
+    resources: ["recoverycontracts", "recoverydrills", "recoverydrills/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["namespaces", "pods", "pods/log", "configmaps", "secrets", "persistentvolumeclaims", "services", "events"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets", "deployments"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cr.kanister.io"]
+    resources: ["actionsets", "blueprints", "profiles"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: recovery-contract-operator
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: recovery-contract-operator
+subjects:
+  - kind: ServiceAccount
+    name: recovery-contract-operator
+    namespace: kanister

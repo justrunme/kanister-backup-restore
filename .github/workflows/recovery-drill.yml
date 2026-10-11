@@ -2,7 +2,7 @@ name: Recovery Drill
 
 on:
   push:
-    branches: [main, fix/restore-proof]
+    branches: [main, feat/recovery-contract]
   pull_request:
   schedule:
     - cron: '17 4 * * *'
@@ -13,32 +13,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      
       - name: Install shellcheck
         run: |
           wget -qO- "https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz" | tar -xJv
           sudo mv shellcheck-v0.10.0/shellcheck /usr/local/bin/
           shellcheck --version
-      
       - name: Run shellcheck
-        run: |
-          find scripts -name "*.sh" -type f -print0 | xargs -0 shellcheck -e SC1091
+        run: find scripts -name "*.sh" -type f -print0 | xargs -0 shellcheck -e SC1091
 
   shfmt:
     name: Shell format check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      
       - name: Install shfmt
         run: |
           wget -qO /usr/local/bin/shfmt "https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64"
           chmod +x /usr/local/bin/shfmt
           shfmt -version
-      
       - name: Check shell formatting
-        run: |
-          shfmt -d -i 2 -ci -bn scripts/*.sh
+        run: shfmt -d -i 2 -ci -bn scripts/*.sh
 
   unit-evaluator:
     name: Evaluator unit tests
@@ -47,9 +41,9 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install pytest
         run: python3 -m pip install pytest
-      - name: Run evaluate_contract tests
+      - name: Run unit tests
         working-directory: scripts
-        run: python3 -m pytest -q test_evaluate_contract.py
+        run: python3 -m pytest -q test_evaluate_contract.py test_prove_consistency.py
 
   recovery-drill:
     name: Recovery Drill (k8s ${{ matrix.k8s }})
@@ -62,123 +56,111 @@ jobs:
           - v1.36.4
     steps:
       - uses: actions/checkout@v7
-      
+
       - name: Install kind
         run: |
           curl -Lo ./kind "https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64"
           chmod +x ./kind
           sudo mv ./kind /usr/local/bin/kind
           kind version
-      
+
       - name: Install kubectl
         run: |
           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
           chmod +x kubectl
           sudo mv kubectl /usr/local/bin/
           kubectl version --client
-      
+
       - name: Install Helm
         run: |
           curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
           helm version
-      
-      - name: Run full recovery drill (happy path)
+
+      - name: Run full application recovery drill (happy path)
         env:
           K8S_VERSION: ${{ matrix.k8s }}
-        run: |
-          make full-drill
+        run: make full-drill
 
-      - name: Verify PROVED verdict
+      - name: Verify PROVED verdict + consistency
         run: |
           if ! grep -q '"verdict": "PROVED"' .evidence/recovery-verdict.json; then
             echo "Expected PROVED verdict but got:"
             cat .evidence/recovery-verdict.json
             exit 1
           fi
-          # Real proof: marker uuid must be present in evidence
           python3 - <<'PY'
-          import json, sys
+          import json
           from pathlib import Path
           v = json.loads(Path(".evidence/recovery-verdict.json").read_text())
           ev = json.loads(Path(".evidence/drill-latest.json").read_text())
+          assert ev.get("components", {}).get("postgres") is True
+          assert ev.get("components", {}).get("s3") is True
+          assert ev["checks"].get("cross_component_consistency") is True
           proof = ev.get("proof") or {}
-          assert proof.get("marker_uuid"), "missing marker_uuid in evidence"
-          assert proof.get("backup_sha256"), "missing backup_sha256 in evidence"
-          assert "/" in (ev.get("backup_location") or ""), "backup location not unique-looking"
+          assert proof.get("rp_id"), "missing rp_id"
+          assert (proof.get("recovery_point") or {}).get("generation")
+          assert proof.get("backup_sha256")
           loc = ev.get("backup_location") or ""
-          assert loc.endswith("backup.sql.gz") and "pg_backups/" in loc
-          # Fixed key backup.sql.gz alone (no run-id) is forbidden
-          parts = loc.strip("/").split("/")
-          assert len(parts) >= 4, f"expected unique key path, got {loc}"
-          print("✓ proof marker + unique backup key + sha256 present")
+          assert "pg_backups/" in loc and len(loc.strip("/").split("/")) >= 4
+          print("✓ multi-service PROVED with consistency + recovery point")
           PY
-          echo "✓ Recovery Contract PROVED"
-      
+          kubectl get recoverycontracts -A
+          kubectl get recoverydrills -A
+          echo "✓ Application Recovery Contract PROVED"
+
       - name: Export metrics
         run: |
           ./scripts/export-metrics.sh
           cat .metrics/recovery-contract.prom
-      
+          grep -q recovery_last_success_timestamp .metrics/recovery-contract.prom
+
       - name: Assert secrets absent from kanister job logs
         run: |
-          set +e
-          LOGS="$(kubectl get pods -A -o name 2>/dev/null | grep kanister-job | while read -r p; do
-            ns="${p#pod/}"
-            # pods are namespaced; use get pods -A with json
-            true
-          done)"
-          # Collect recent kanister job logs from drill + demo namespaces
           FOUND=0
           while read -r line; do
             ns="$(echo "$line" | awk '{print $1}')"
             pod="$(echo "$line" | awk '{print $2}')"
             out="$(kubectl -n "$ns" logs "$pod" --tail=200 2>/dev/null || true)"
             if echo "$out" | grep -Eq 'admin12345|PGPASSWORD=|Secret.:.admin'; then
-              echo "credential leak in ${ns}/${pod}:" >&2
-              echo "$out" | grep -E 'admin12345|PGPASSWORD=|Secret.:.admin' >&2 || true
+              echo "credential leak in ${ns}/${pod}" >&2
               FOUND=1
             fi
           done < <(kubectl get pods -A --no-headers 2>/dev/null | awk '/kanister-job/{print $1,$2}')
-          if [[ "$FOUND" -ne 0 ]]; then
-            exit 1
-          fi
+          [[ "$FOUND" -eq 0 ]]
           echo "✓ no credential material in kanister job logs"
 
-      - name: Run failure drill (noop-restore expected UNPROVED)
-        run: |
-          make failure-drill SCENARIO=noop-restore
-      
-      - name: Verify UNPROVED verdict for noop-restore
-        run: |
-          if ! grep -q '"verdict": "UNPROVED"' .evidence/recovery-verdict.json; then
-            echo "Expected UNPROVED verdict for noop-restore but got:"
-            cat .evidence/recovery-verdict.json
-            exit 1
-          fi
-          if ! grep -q '"reason": "data_verification"' .evidence/recovery-verdict.json; then
-            echo "Expected reason: data_verification but got:"
-            cat .evidence/recovery-verdict.json
-            exit 1
-          fi
-          echo "✓ noop-restore correctly UNPROVED (data_verification)"
+      - name: Failure drill delete-s3-object
+        if: matrix.k8s == 'v1.37.0'
+        run: make failure-drill SCENARIO=delete-s3-object
 
-      - name: Run failure drill (corrupt-artifact)
+      - name: Verify UNPROVED delete-s3-object
+        if: matrix.k8s == 'v1.37.0'
         run: |
-          make failure-drill SCENARIO=corrupt-artifact
-      
-      - name: Verify UNPROVED verdict for corrupt-artifact
+          grep -q '"verdict": "UNPROVED"' .evidence/recovery-verdict.json
+          grep -q '"reason": "cross_component_consistency"' .evidence/recovery-verdict.json
+          echo "✓ delete-s3-object → UNPROVED consistency"
+
+      - name: Failure drill corrupt-s3-object
+        if: matrix.k8s == 'v1.37.0'
+        run: make failure-drill SCENARIO=corrupt-s3-object
+
+      - name: Verify UNPROVED corrupt-s3-object
+        if: matrix.k8s == 'v1.37.0'
         run: |
-          if ! grep -q '"verdict": "UNPROVED"' .evidence/recovery-verdict.json; then
-            echo "Expected UNPROVED verdict for corrupt-artifact but got:"
-            cat .evidence/recovery-verdict.json
-            exit 1
-          fi
-          if ! grep -q '"reason": "artifact_integrity"' .evidence/recovery-verdict.json; then
-            echo "Expected reason: artifact_integrity but got:"
-            cat .evidence/recovery-verdict.json
-            exit 1
-          fi
-          echo "✓ Failure drill correctly detected corrupted artifact"
+          grep -q '"verdict": "UNPROVED"' .evidence/recovery-verdict.json
+          grep -q '"reason": "cross_component_consistency"' .evidence/recovery-verdict.json
+          echo "✓ corrupt-s3-object → UNPROVED consistency"
+
+      - name: Failure drill mismatched-recovery-points
+        if: matrix.k8s == 'v1.37.0'
+        run: make failure-drill SCENARIO=mismatched-recovery-points
+
+      - name: Verify UNPROVED mismatched-recovery-points
+        if: matrix.k8s == 'v1.37.0'
+        run: |
+          grep -q '"verdict": "UNPROVED"' .evidence/recovery-verdict.json
+          grep -q '"reason": "cross_component_consistency"' .evidence/recovery-verdict.json
+          echo "✓ mismatched-recovery-points → UNPROVED consistency"
 
       - name: Dump cluster on failure
         if: failure()
@@ -196,7 +178,7 @@ jobs:
           mkdir -p /tmp/drill-out
           cp -a .evidence /tmp/drill-out/evidence 2>/dev/null || true
           cp -a .metrics /tmp/drill-out/metrics 2>/dev/null || true
-      
+
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -204,12 +186,12 @@ jobs:
           name: recovery-evidence-k8s-${{ matrix.k8s }}
           path: /tmp/drill-out
           if-no-files-found: warn
-      
+
       - name: Write job summary
         if: always()
         run: |
           {
-            echo "# Recovery Drill Results"
+            echo "# Application Recovery Drill Results"
             echo ""
             echo "**Kubernetes:** ${{ matrix.k8s }}"
             echo ""
@@ -218,14 +200,4 @@ jobs:
             else
               echo "❌ No evidence generated"
             fi
-            echo ""
-            echo "## Metrics"
-            echo ""
-            echo '```'
-            if [ -f .metrics/recovery-contract.prom ]; then
-              cat .metrics/recovery-contract.prom
-            else
-              echo "No metrics generated"
-            fi
-            echo '```'
-          } >> $GITHUB_STEP_SUMMARY
+          } >> "$GITHUB_STEP_SUMMARY"

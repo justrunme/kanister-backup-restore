@@ -44,8 +44,17 @@ EVIDENCE_SCHEMA: dict[str, Any] = {
                 "restore_completed": {"type": "boolean"},
                 "application_health": {"type": "boolean"},
                 "data_verification": {"type": "boolean"},
+                "cross_component_consistency": {"type": "boolean"},
                 "rto_within_target": {"type": "boolean"},
                 "evidence_fresh": {"type": "boolean"},
+            },
+            "additionalProperties": True,
+        },
+        "components": {
+            "type": "object",
+            "properties": {
+                "postgres": {"type": "boolean"},
+                "s3": {"type": "boolean"},
             },
             "additionalProperties": True,
         },
@@ -211,12 +220,25 @@ def evaluate(
     age_max = int(contract["evidence_freshness_hours_max"])
     fresh_ok = age_h != float("inf") and float(age_h) <= age_max
 
+    components = ev.get("components") or {}
+    multi_service = components.get("postgres") is True and components.get("s3") is True
+    consistency_required = (
+        contract.get("cross_component_consistency") == "required" and multi_service
+    ) or ("cross_component_consistency" in checks)
+    consistency_ok = check_bool(checks, "cross_component_consistency")
+
     clauses = [
         ("backup", backup_ok, "required"),
         ("artifact_integrity", artifact_ok, "required"),
         ("isolated_restore", restore_ok, "required"),
         ("application_ready", app_ok, "required"),
         ("data_verification", data_ok, "required"),
+    ]
+    if consistency_required:
+        clauses.append(
+            ("cross_component_consistency", consistency_ok, "required")
+        )
+    clauses += [
         ("rto", rto_ok, f"< {rto_max}s"),
         ("evidence_freshness", fresh_ok, f"< {age_max}h"),
     ]
@@ -251,11 +273,17 @@ def evaluate(
             "PASS" if data_ok else ("—" if not restore_ok else "FAIL")
         ),
     }
+    if consistency_required:
+        results["Cross-component consistency"] = (
+            "PASS" if consistency_ok else ("—" if not restore_ok else "FAIL")
+        )
 
     if blocked == "validate" or (not artifact_ok and not restore_ok):
         results["Isolated restore"] = "BLOCKED"
         results["Application ready"] = "—"
         results["Recovery marker"] = "—"
+        if consistency_required:
+            results["Cross-component consistency"] = "—"
 
     return {
         "verdict": verdict,

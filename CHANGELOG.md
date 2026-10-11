@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.0] - 2026-10-11
+
+Multi-service Application Recovery Contract (Postgres + S3):
+
+- Linked demo state (object key + sha256 + generation) under one logical recovery point
+- Cross-component consistency proof; PROVED only when components and consistency pass
+- Negative drills: `delete-s3-object`, `corrupt-s3-object`, `mismatched-recovery-points`
+- CRDs `RecoveryContract` / `RecoveryDrill` + kopf operator; ResourceQuota/LimitRange on drill namespaces
+- Metrics: `recovery_last_success_timestamp` alongside verdict/RTO
+- Solr listed as future scope
+
 ## [1.1.0] - 2026-10-11
 
 Restore proof hardening (Recovery Contract must not false-positive):

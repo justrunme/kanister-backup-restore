@@ -1,36 +1,9 @@
-# Architecture — Recovery Contract
+# Architecture
 
-```text
-PROTECT → VALIDATE → RESTORE → PROVE
-```
+Application Recovery Contract for **Postgres + S3**:
 
-Kanister is the execution engine (Blueprints, ActionSets, Profiles).  
-This repository is the **assurance layer**: a Recovery Contract with a binary verdict.
-
-## Contract
-
-See `config/recovery-contract.yaml`:
-
-- artifact integrity — required
-- isolated restore — required
-- application ready — required
-- data verification — required
-- RTO — &lt; 60s
-- evidence freshness — &lt; 24h
-
-**PROVED** only when every clause passes.  
-Otherwise **UNPROVED** with an explicit `Reason`.
-
-No percentage scores.
-
-## Failure injection
-
-`make failure-drill SCENARIO=corrupt-artifact` (and siblings) prove when confidence must collapse — separately from the happy path.
-
-## Visual
-
-`docs/assets/recovery-lifecycle.svg`
-
-## Case study
-
-https://justrunme.com/cases/kanister-backup-restore/
+1. **Linked state** — `app_manifest.generation` and `app_objects(object_key, sha256, generation)` reference objects in the SeaweedFS/MinIO bucket.
+2. **Recovery point** — one `rp-id` binds a Kanister Postgres backup (unique key + sha256) with copied S3 objects and `manifest.json` (timestamps, generation, object list).
+3. **Drill** — restore Postgres into an unseeded namespace (ResourceQuota/LimitRange) and pull RP objects; PROVE runs cross-component consistency.
+4. **CRDs** — `RecoveryContract` (targets, RTO/RPO, evidence TTL, schedule) and `RecoveryDrill` (status: verdict, last success, evidence digest) reconciled by a kopf operator.
+5. **Future** — Solr indexing as an additional component (not implemented).

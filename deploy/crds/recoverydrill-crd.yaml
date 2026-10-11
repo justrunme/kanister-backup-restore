@@ -1,0 +1,76 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: recoverydrills.recovery.justrunme.com
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+spec:
+  group: recovery.justrunme.com
+  names:
+    kind: RecoveryDrill
+    listKind: RecoveryDrillList
+    plural: recoverydrills
+    singular: recoverydrill
+    shortNames: [rdrill]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [contractRef]
+              properties:
+                contractRef:
+                  type: string
+                  description: Name of the RecoveryContract in the same namespace
+                scenario:
+                  type: string
+                  default: happy-path
+                suspend:
+                  type: boolean
+                  default: false
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum: [Pending, Running, Succeeded, Failed]
+                lastVerdict:
+                  type: string
+                  enum: [PROVED, UNPROVED, ""]
+                lastReason:
+                  type: string
+                lastSuccessTime:
+                  type: string
+                  format: date-time
+                lastRunTime:
+                  type: string
+                  format: date-time
+                evidenceDigest:
+                  type: string
+                rtoSeconds:
+                  type: integer
+                drillNamespace:
+                  type: string
+                message:
+                  type: string
+                observedGeneration:
+                  type: integer
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Verdict
+          type: string
+          jsonPath: .status.lastVerdict
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: LastSuccess
+          type: date
+          jsonPath: .status.lastSuccessTime

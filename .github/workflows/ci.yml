@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, fix/restore-proof]
+    branches: [main, feat/recovery-contract]
   pull_request:
 
 jobs:

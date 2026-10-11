@@ -1,7 +1,8 @@
 # Recovery Contract — measurable prove of recoverability.
 # Verdict is binary: PROVED | UNPROVED. No percentage scores.
+# Multi-service: Postgres + S3 (SeaweedFS/MinIO). Solr is future scope.
 
-version: 1
+version: 2
 name: recovery-contract
 tagline: Restore should be proved, not assumed.
 lifecycle: PROTECT → VALIDATE → RESTORE → PROVE
@@ -11,8 +12,17 @@ contract:
   isolated_restore: required
   application_ready: required
   data_verification: required
+  cross_component_consistency: required
   rto_seconds_max: 60
   evidence_freshness_hours_max: 24
+  recovery_point_skew_seconds_max: 60
+
+components:
+  - postgres
+  - s3
+
+future:
+  - solr
 
 failure_scenarios:
   corrupt-artifact:
@@ -30,3 +40,12 @@ failure_scenarios:
   noop-restore:
     description: Restore ActionSet completes without applying data so DATA VERIFY fails
     expected_reason: data_verification
+  delete-s3-object:
+    description: Delete one S3 object from the recovery point after backup
+    expected_reason: cross_component_consistency
+  corrupt-s3-object:
+    description: Corrupt one S3 object in the recovery point after backup
+    expected_reason: cross_component_consistency
+  mismatched-recovery-points:
+    description: Restore Postgres from RP-A and S3 from RP-B
+    expected_reason: cross_component_consistency
