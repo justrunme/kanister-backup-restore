@@ -1,52 +1,72 @@
 {
   "repo": "kanister-backup-restore",
-  "source_run": "https://github.com/justrunme/kanister-backup-restore/actions/runs/38123463908",
-  "measured_at": "2026-10-11T08:06:01Z",
+  "source_run": "https://github.com/justrunme/kanister-backup-restore/actions/runs/38131463362",
+  "measured_at": "2026-10-11T10:23:50Z",
   "metrics": {
     "happy_path": {
       "k8s_v1.37.0": {
-        "rto_seconds": 6,
-        "rpo_seconds": 7,
+        "rto_seconds": 8,
+        "component_skew_seconds": 13,
         "verdict": "PROVED",
         "cross_component_consistency": true,
-        "backup_location": "pg_backups/demo-postgres/postgres/20261011T080528Z-fd488af0-0c87-43be-90a5-dfd270011d25/backup.sql.gz",
-        "backup_sha256": "935e8e1dfc3a10cbdd3ff554465212467f9b3b95639b349a9c7ec5698559724a",
-        "rp_id": "rp-20261011T080508Z-5bc472d8a7",
-        "generation": 1791705906,
+        "backup_location": "pg_backups/demo-postgres/postgres/20261011T102012Z-e7c0b21b-5402-420e-91a6-8298dc94e181/backup.sql.gz",
+        "backup_sha256": "cea49ff5ef2901846be835a52ecc95221c102818ead17d4995efbeedd796356a",
+        "rp_id": "rp-20261011T101959Z-878b148bde",
+        "generation": 1791713998,
         "object_count": 3,
-        "restore_actionset": "restore-postgres-20261011080543",
-        "drill_namespace": "restore-drill-20261011080543",
-        "collected_at": "2026-10-11T08:06:01Z"
+        "restore_actionset": "restore-postgres-20261011102033",
+        "drill_namespace": "restore-drill-20261011102033",
+        "collected_at": "2026-10-11T10:20:52Z",
+        "components": {
+          "postgres": true,
+          "s3": true
+        }
       },
       "k8s_v1.36.4": {
-        "rto_seconds": 7,
-        "rpo_seconds": 10,
+        "rto_seconds": 8,
+        "component_skew_seconds": 9,
         "verdict": "PROVED",
         "cross_component_consistency": true,
-        "backup_location": "pg_backups/demo-postgres/postgres/20261011T080529Z-939816a4-ff8a-4c69-97db-bcd9ead8236e/backup.sql.gz",
-        "backup_sha256": "04c92169feecb8e483f8d651e2a880429d794b6ca2c7d94f5009e7c686a13c91",
-        "rp_id": "rp-20261011T080512Z-2997a61a91",
-        "generation": 1791705911,
+        "backup_location": "pg_backups/demo-postgres/postgres/20261011T102015Z-35a639b7-33c0-4b99-963b-76039a73fe72/backup.sql.gz",
+        "backup_sha256": "74d21ff00535be0130ddcc9070c916cc86a2aed82e9baa35162f2991ae2f72c7",
+        "rp_id": "rp-20261011T102003Z-dccc3c2681",
+        "generation": 1791714001,
         "object_count": 3,
-        "restore_actionset": "restore-postgres-20261011080547",
-        "drill_namespace": "restore-drill-20261011080547",
-        "collected_at": "2026-10-11T08:06:06Z"
+        "restore_actionset": "restore-postgres-20261011102033",
+        "drill_namespace": "restore-drill-20261011102033",
+        "collected_at": "2026-10-11T10:20:53Z",
+        "components": {
+          "postgres": true,
+          "s3": true
+        }
       }
     },
     "failure_delete_s3_object": {
       "verdict": "UNPROVED",
-      "reason": "cross_component_consistency",
-      "blocked_at": "consistency"
+      "reason": "isolated_restore",
+      "blocked_at": "restore",
+      "components": {
+        "postgres": false,
+        "s3": false
+      }
     },
     "failure_corrupt_s3_object": {
       "verdict": "UNPROVED",
       "reason": "cross_component_consistency",
-      "blocked_at": "consistency"
+      "blocked_at": "consistency",
+      "components": {
+        "postgres": true,
+        "s3": false
+      }
     },
     "failure_mismatched_recovery_points": {
       "verdict": "UNPROVED",
-      "reason": "cross_component_consistency",
-      "blocked_at": "consistency"
+      "reason": "data_verification",
+      "blocked_at": "verify",
+      "components": {
+        "postgres": false,
+        "s3": false
+      }
     },
     "rto_seconds_max": 60,
     "recovery_point_skew_seconds_max": 60

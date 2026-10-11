@@ -36,6 +36,10 @@ def prove(
     skew_max_seconds: int,
 ) -> dict[str, Any]:
     errors: list[str] = []
+    if not pg_rows:
+        errors.append("empty postgres rows — refuse to prove consistency on empty data")
+    if not rp_manifest.get("objects"):
+        errors.append("empty recovery point objects — refuse to prove consistency on empty data")
     rp_gen = int(rp_manifest.get("generation", -1))
     if pg_generation != rp_gen:
         errors.append(f"generation mismatch postgres={pg_generation} rp={rp_gen}")

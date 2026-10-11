@@ -2,7 +2,11 @@
 # Run locally against a cluster:
 #   pip install -r operator/requirements.txt
 #   RECOVERY_ROOT=$PWD kopf run operator/controller.py --standalone -n kanister
-# Or apply RBAC below and schedule drills via RecoveryDrill CRs from CI/CronJob.
+#
+# RBAC is least-privilege:
+# - ClusterRole for namespace lifecycle only (create drill namespaces)
+# - ClusterRole for drill-namespace workloads, bound per-namespace via RoleBinding (not cluster-wide)
+# - Role in kanister for secrets/CRs/Kanister resources (no cluster-wide secrets)
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -11,10 +15,58 @@ metadata:
   labels:
     app.kubernetes.io/name: kanister-backup-restore
 ---
+# Namespace lifecycle only (create/delete drill namespaces).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
+  name: recovery-contract-operator-namespaces
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: recovery-contract-operator-namespaces
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: recovery-contract-operator-namespaces
+subjects:
+  - kind: ServiceAccount
+    name: recovery-contract-operator
+    namespace: kanister
+---
+# Drill-namespace permissions. Bind with a RoleBinding in each drill/demo ns
+# (never via ClusterRoleBinding — that would grant cluster-wide secrets).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: recovery-contract-operator-drill
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "configmaps", "secrets", "persistentvolumeclaims", "services", "events"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets", "deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+# Kanister namespace Role: secrets and Kanister/Recovery CRs stay namespaced.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
   name: recovery-contract-operator
+  namespace: kanister
   labels:
     app.kubernetes.io/name: kanister-backup-restore
 rules:
@@ -22,7 +74,7 @@ rules:
     resources: ["recoverycontracts", "recoverydrills", "recoverydrills/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch"]
   - apiGroups: [""]
-    resources: ["namespaces", "pods", "pods/log", "configmaps", "secrets", "persistentvolumeclaims", "services", "events"]
+    resources: ["pods", "pods/log", "configmaps", "secrets", "persistentvolumeclaims", "services", "events"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
@@ -33,16 +85,20 @@ rules:
   - apiGroups: ["cr.kanister.io"]
     resources: ["actionsets", "blueprints", "profiles"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: recovery-contract-operator
+  namespace: kanister
   labels:
     app.kubernetes.io/name: kanister-backup-restore
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: recovery-contract-operator
 subjects:
   - kind: ServiceAccount

@@ -1,53 +1,24 @@
-# Results
+# Recovery Contract results
 
-Measured from Recovery Drill run [`38123463908`](https://github.com/justrunme/kanister-backup-restore/actions/runs/38123463908) (2026-10-11). Artifacts: `recovery-evidence-k8s-v1.37.0`, `recovery-evidence-k8s-v1.36.4`.
+Source run: [https://github.com/justrunme/kanister-backup-restore/actions/runs/38131463362](https://github.com/justrunme/kanister-backup-restore/actions/runs/38131463362)
 
-## Happy-path drill (Postgres + S3 recovery point → restore → prove)
+Measured at: `2026-10-11T10:23:50Z` (UTC)
 
-| Metric | k8s v1.37.0 | k8s v1.36.4 |
-| --- | ---: | ---: |
-| RTO (restore window) | **6 s** | **7 s** |
-| RPO (pg↔s3 RP timestamp skew) | 7 s | 10 s |
-| Artifact integrity | PASS | PASS |
-| Application ready | PASS | PASS |
-| Data verification | PASS | PASS |
-| Cross-component consistency | PASS | PASS |
-| Contract verdict | **PROVED** | **PROVED** |
-| Contract RTO max | 60 s | 60 s |
-| RP generation / objects | 1791705906 / 3 | 1791705911 / 3 |
+## Happy path (PROVED)
 
-Source evidence (v1.37.0 happy-path): `drill-20261011T080601Z.json` — `restore_actionset=restore-postgres-20261011080543`, `drill_namespace=restore-drill-20261011080543`, `rp_id=rp-20261011T080508Z-5bc472d8a7`.
+| k8s | RTO (s) | component skew (s) | RP | objects | components |
+|---|---:|---:|---|---:|---|
+| v1.37.0 | 8 | 13 | `rp-20261011T101959Z-878b148bde` | 3 | `{'postgres': True, 's3': True}` |
+| v1.36.4 | 8 | 9 | `rp-20261011T102003Z-dccc3c2681` | 3 | `{'postgres': True, 's3': True}` |
 
-Source evidence (v1.36.4 happy-path): `drill-20261011T080606Z.json` — `restore_actionset=restore-postgres-20261011080547`, `drill_namespace=restore-drill-20261011080547`, `rp_id=rp-20261011T080512Z-2997a61a91`.
+## Failure scenarios (UNPROVED)
 
-## Failure drill (delete-s3-object)
+| scenario | reason | blocked_at | components |
+|---|---|---|---|
+| delete-s3-object | isolated_restore | restore | `{'postgres': False, 's3': False}` |
+| corrupt-s3-object | cross_component_consistency | consistency | `{'postgres': True, 's3': False}` |
+| mismatched-recovery-points | data_verification | verify | `{'postgres': False, 's3': False}` |
 
-| Check | Result |
-| --- | --- |
-| Scenario | `delete-s3-object` |
-| Verdict | **UNPROVED** |
-| Reason | `cross_component_consistency` |
-| Blocked at | `consistency` |
-| Notes | Deleted one object from the recovery point; Postgres restored but required S3 object missing |
+Contract ceilings: RTO ≤ 60s, component skew ≤ 60s.
 
-## Failure drill (corrupt-s3-object)
-
-| Check | Result |
-| --- | --- |
-| Scenario | `corrupt-s3-object` |
-| Verdict | **UNPROVED** |
-| Reason | `cross_component_consistency` |
-| Blocked at | `consistency` |
-| Notes | Corrupted one RP object; sha256 mismatch vs Postgres / manifest |
-
-## Failure drill (mismatched-recovery-points)
-
-| Check | Result |
-| --- | --- |
-| Scenario | `mismatched-recovery-points` |
-| Verdict | **UNPROVED** |
-| Reason | `cross_component_consistency` |
-| Blocked at | `consistency` |
-| Notes | Mixed old Postgres backup with newer S3 recovery-point objects |
-
-Prometheus export from the same run (happy-path): `recovery_rto_seconds{scenario="happy-path"} 6` (v1.37.0) / `7` (v1.36.4).
+Machine-readable: [`results.json`](./results.json).

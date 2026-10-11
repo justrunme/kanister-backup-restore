@@ -62,7 +62,7 @@ EVIDENCE_SCHEMA: dict[str, Any] = {
             "type": "object",
             "required": ["rto_seconds"],
             "properties": {
-                "rpo_seconds": {"type": ["integer", "null"]},
+                "component_skew_seconds": {"type": ["integer", "null"]},
                 "rto_seconds": {"type": ["integer", "null"]},
                 "rto_target_seconds": {"type": ["integer", "null"]},
                 "evidence_age_hours": {"type": ["number", "null"]},
@@ -294,7 +294,7 @@ def evaluate(
         "results": results,
         "clauses": [{"name": n, "ok": ok, "requirement": req} for n, ok, req in clauses],
         "metrics": {
-            "rpo_seconds": metrics.get("rpo_seconds"),
+            "component_skew_seconds": metrics.get("component_skew_seconds"),
             "rto_seconds": rto,
             "rto_max_seconds": rto_max,
             "evidence_age_hours": None if age_h == float("inf") else age_h,
@@ -388,7 +388,7 @@ def write_outputs(report: dict[str, Any], out_dir: Path, clauses: list) -> None:
         lines.append(f"- {k}: {v}")
     lines += [
         "",
-        f"- RPO: {fmt_duration(metrics.get('rpo_seconds'))}",
+        f"- Component skew: {fmt_duration(metrics.get('component_skew_seconds'))}",
         f"- RTO: {fmt_duration(metrics.get('rto_seconds'))}",
         f"- Evidence age: {fmt_age_minutes(metrics.get('evidence_age_hours'))}",
         "",
@@ -414,7 +414,7 @@ def print_card(report: dict[str, Any], clauses: list) -> None:
     for label, val in results.items():
         print(f"│  {label:<22} {val:<19}│")
     print("├" + "─" * w + "┤")
-    print(f"│  {'RPO':<22} {fmt_duration(metrics.get('rpo_seconds')):<19}│")
+    print(f"│  {'Component skew':<22} {fmt_duration(metrics.get('component_skew_seconds')):<19}│")
     print(f"│  {'RTO':<22} {fmt_duration(metrics.get('rto_seconds')):<19}│")
     print(
         f"│  {'Evidence age':<22} {fmt_age_minutes(metrics.get('evidence_age_hours')):<19}│"

@@ -47,7 +47,7 @@ def _base_evidence(**overrides):
             "evidence_fresh": True,
         },
         "metrics": {
-            "rpo_seconds": 12,
+            "component_skew_seconds": 12,
             "rto_seconds": 30,
             "drill_id": 1,
         },
