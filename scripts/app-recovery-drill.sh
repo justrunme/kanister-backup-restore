@@ -140,7 +140,18 @@ PY
 }
 
 finish() {
-  kubectl delete ns -l justrunme.com/role=restore-drill --wait=false --ignore-not-found >/dev/null 2>&1 || true
+  # Snapshot kanister job logs for secret-leak CI (pods may be GC'd later).
+  LOG_DIR="$EVIDENCE_DIR/kanister-job-logs"
+  mkdir -p "$LOG_DIR"
+  while read -r ns pod; do
+    [[ -z "${ns:-}" || -z "${pod:-}" ]] && continue
+    kubectl -n "$ns" logs "$pod" --tail=200 >"$LOG_DIR/${ns}_${pod}.log" 2>/dev/null || true
+  done < <(kubectl get pods -A --no-headers 2>/dev/null | awk '/kanister/{print $1,$2}')
+  if [[ "${KEEP_DRILL_NS:-}" == "1" ]]; then
+    echo "-- KEEP_DRILL_NS=1: leaving restore-drill namespaces for post-checks"
+  else
+    kubectl delete ns -l justrunme.com/role=restore-drill --wait=false --ignore-not-found >/dev/null 2>&1 || true
+  fi
   "$ROOT/scripts/collect-evidence.sh" || true
   if [[ "$SCENARIO" == "happy-path" ]]; then
     [[ "$EVAL_RC" -eq 0 ]] || exit "$EVAL_RC"

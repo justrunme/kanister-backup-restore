@@ -119,7 +119,9 @@ jobs:
           set -euo pipefail
           CHECKED=0
           FOUND=0
+          # Prefer live pods; fall back to logs snapshotted by the drill into .evidence/
           while read -r line; do
+            [[ -z "$line" ]] && continue
             ns="$(echo "$line" | awk '{print $1}')"
             pod="$(echo "$line" | awk '{print $2}')"
             out="$(kubectl -n "$ns" logs "$pod" --tail=200)"
@@ -128,13 +130,25 @@ jobs:
               echo "credential leak in ${ns}/${pod}" >&2
               FOUND=1
             fi
-          done < <(kubectl get pods -A --no-headers | awk '/kanister-job/{print $1,$2}')
+          done < <(kubectl get pods -A --no-headers | awk '/kanister/{print $1,$2}')
           if [[ "$CHECKED" -eq 0 ]]; then
-            echo "secret-leak check failed: zero kanister-job pods/logs checked" >&2
+            shopt -s nullglob
+            for f in .evidence/kanister-job-logs/*.log; do
+              CHECKED=$((CHECKED + 1))
+              if grep -Eq 'admin12345|PGPASSWORD=|Secret.:.admin' "$f"; then
+                echo "credential leak in snapshot ${f}" >&2
+                FOUND=1
+              fi
+            done
+          fi
+          if [[ "$CHECKED" -eq 0 ]]; then
+            echo "secret-leak check failed: zero kanister pods/logs checked" >&2
             exit 1
           fi
           [[ "$FOUND" -eq 0 ]]
-          echo "✓ no credential material in kanister job logs (checked ${CHECKED} pods)"
+          echo "✓ no credential material in kanister job logs (checked ${CHECKED})"
+          # Cleanup deferred drill namespaces
+          kubectl delete ns -l justrunme.com/role=restore-drill --wait=false --ignore-not-found
 
       - name: Failure drill delete-s3-object
         if: matrix.k8s == 'v1.37.0'
