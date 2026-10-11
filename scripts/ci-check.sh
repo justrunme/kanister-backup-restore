@@ -147,6 +147,34 @@ missing.write_text(json.dumps({
   },
   "metrics": {"rpo_seconds": 1, "rto_seconds": 10, "drill_id": 45}
 }) + "\n")
+falsey = pathlib.Path(".evidence-ci/drill-backup-false.json")
+falsey.write_text(json.dumps({
+  "drill_id": 46,
+  "scenario": "happy-path",
+  "collected_at": fresh,
+  "checks": {
+    "backup": False,
+    "artifact_integrity": True,
+    "restore_completed": True,
+    "application_health": True,
+    "data_verification": True
+  },
+  "metrics": {"rpo_seconds": 1, "rto_seconds": 10, "drill_id": 46}
+}) + "\n")
+str_false = pathlib.Path(".evidence-ci/drill-backup-string.json")
+str_false.write_text(json.dumps({
+  "drill_id": 47,
+  "scenario": "happy-path",
+  "collected_at": fresh,
+  "checks": {
+    "backup": "false",
+    "artifact_integrity": True,
+    "restore_completed": True,
+    "application_health": True,
+    "data_verification": True
+  },
+  "metrics": {"rpo_seconds": 1, "rto_seconds": 10, "drill_id": 47}
+}) + "\n")
 PY
 
 set +e
@@ -156,8 +184,12 @@ EVIDENCE_DIR=.evidence-ci ./scripts/evaluate-contract.sh .evidence-ci/drill-fail
 RC_FAIL=${PIPESTATUS[0]}
 EVIDENCE_DIR=.evidence-ci ./scripts/evaluate-contract.sh .evidence-ci/drill-stale.json | tee /tmp/rc-stale.out
 RC_STALE=${PIPESTATUS[0]}
-EVIDENCE_DIR=.evidence-ci ./scripts/evaluate-contract.sh .evidence-ci/drill-missing.json | tee /tmp/rc-missing.out
-RC_MISSING=${PIPESTATUS[0]}
+EVIDENCE_DIR=.evidence-ci ./scripts/evaluate-contract.sh .evidence-ci/drill-missing.json >/tmp/rc-missing.out 2>&1
+RC_MISSING=$?
+EVIDENCE_DIR=.evidence-ci ./scripts/evaluate-contract.sh .evidence-ci/drill-backup-false.json | tee /tmp/rc-false.out
+RC_FALSE=${PIPESTATUS[0]}
+EVIDENCE_DIR=.evidence-ci ./scripts/evaluate-contract.sh .evidence-ci/drill-backup-string.json >/tmp/rc-strfalse.out 2>&1
+RC_STRFALSE=$?
 set -e
 
 [[ "$RC_PROVE" -eq 0 ]] || {
@@ -177,11 +209,23 @@ grep -q 'artifact_integrity' /tmp/rc-fail.out || fail=1
   fail=1
 }
 grep -q 'evidence_freshness' /tmp/rc-stale.out || fail=1
-[[ "$RC_MISSING" -eq 2 ]] || {
-  echo "expected exit 2 for missing backup check, got $RC_MISSING" >&2
+# Missing required check field → schema error (exit 1)
+[[ "$RC_MISSING" -eq 1 ]] || {
+  echo "expected exit 1 for missing backup field (schema), got $RC_MISSING" >&2
   fail=1
 }
-grep -q 'backup' /tmp/rc-missing.out || fail=1
+grep -qi 'backup' /tmp/rc-missing.out || fail=1
+# Literal false → UNPROVED (exit 2)
+[[ "$RC_FALSE" -eq 2 ]] || {
+  echo "expected exit 2 for backup=false, got $RC_FALSE" >&2
+  fail=1
+}
+grep -q 'backup' /tmp/rc-false.out || fail=1
+# String "false" → schema error (exit 1), never treated as pass
+[[ "$RC_STRFALSE" -eq 1 ]] || {
+  echo "expected exit 1 for backup=\"false\" string, got $RC_STRFALSE" >&2
+  fail=1
+}
 rm -rf .evidence-ci
 
 echo "== evaluate_contract unit tests =="

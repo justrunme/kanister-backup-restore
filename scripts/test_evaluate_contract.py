@@ -3,9 +3,20 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
-from evaluate_contract import evaluate, evidence_age_hours
+import pytest
+
+from evaluate_contract import (
+    EvidenceSchemaError,
+    check_bool,
+    evaluate,
+    evidence_age_hours,
+    main,
+    validate_evidence,
+)
 
 
 CONTRACT = {
@@ -16,6 +27,8 @@ CONTRACT = {
     "rto_seconds_max": 60,
     "evidence_freshness_hours_max": 24,
 }
+
+NOW = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
 
 
 def _base_evidence(**overrides):
@@ -50,10 +63,33 @@ def test_happy_path_proved():
     assert result["reason"] is None
 
 
-def test_missing_check_fails_closed():
+def test_missing_backup_fails_closed():
     ev = _base_evidence()
     del ev["checks"]["backup"]
-    result = evaluate(ev, CONTRACT, now=datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc))
+    with pytest.raises(EvidenceSchemaError):
+        evaluate(ev, CONTRACT, now=NOW)
+    # Even without schema gate, check_bool fails closed.
+    result = evaluate(ev, CONTRACT, now=NOW, validate=False)
+    assert result["verdict"] == "UNPROVED"
+    assert result["reason"] == "backup"
+
+
+def test_backup_string_false_fails_closed():
+    ev = _base_evidence()
+    ev["checks"]["backup"] = "false"
+    with pytest.raises(EvidenceSchemaError):
+        validate_evidence(ev)
+    assert check_bool(ev["checks"], "backup") is False
+    result = evaluate(ev, CONTRACT, now=NOW, validate=False)
+    assert result["verdict"] == "UNPROVED"
+    assert result["reason"] == "backup"
+
+
+def test_backup_integer_one_fails_closed():
+    ev = _base_evidence()
+    ev["checks"]["backup"] = 1
+    assert check_bool(ev["checks"], "backup") is False
+    result = evaluate(ev, CONTRACT, now=NOW, validate=False)
     assert result["verdict"] == "UNPROVED"
     assert result["reason"] == "backup"
 
@@ -66,10 +102,54 @@ def test_stale_evidence_unproved():
     assert result["metrics"]["evidence_age_hours"] == 26.0
 
 
+def test_missing_collected_at_unproved():
+    ev = _base_evidence()
+    del ev["collected_at"]
+    with pytest.raises(EvidenceSchemaError):
+        validate_evidence(ev)
+    age = evidence_age_hours(ev, now=NOW)
+    assert age == float("inf")
+    result = evaluate(ev, CONTRACT, now=NOW, validate=False)
+    assert result["verdict"] == "UNPROVED"
+    assert result["reason"] == "evidence_freshness"
+
+
+def test_metrics_evidence_age_ignored_when_collected_at_stale():
+    """supplied evidence_age_hours=0 must not override an old collected_at."""
+    now = datetime(2026, 10, 12, 14, 0, tzinfo=timezone.utc)  # 26h after collected_at
+    ev = _base_evidence()
+    ev["metrics"]["evidence_age_hours"] = 0
+    age = evidence_age_hours(ev, now=now)
+    assert age == 26.0
+    result = evaluate(ev, CONTRACT, now=now)
+    assert result["verdict"] == "UNPROVED"
+    assert result["reason"] == "evidence_freshness"
+    assert result["metrics"]["evidence_age_hours"] == 26.0
+
+
+def test_future_timestamp_unproved():
+    ev = _base_evidence(collected_at="2026-10-11T18:00:00Z")  # 6h in the future vs NOW
+    age = evidence_age_hours(ev, now=NOW)
+    assert age == float("inf")
+    result = evaluate(ev, CONTRACT, now=NOW)
+    assert result["verdict"] == "UNPROVED"
+    assert result["reason"] == "evidence_freshness"
+    assert result["metrics"]["evidence_age_hours"] is None
+
+
+def test_unparseable_collected_at_unproved():
+    ev = _base_evidence(collected_at="not-a-timestamp")
+    age = evidence_age_hours(ev, now=NOW)
+    assert age == float("inf")
+    result = evaluate(ev, CONTRACT, now=NOW, validate=False)
+    assert result["verdict"] == "UNPROVED"
+    assert result["reason"] == "evidence_freshness"
+
+
 def test_rto_breach():
     ev = _base_evidence()
     ev["metrics"]["rto_seconds"] = 90
-    result = evaluate(ev, CONTRACT, now=datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc))
+    result = evaluate(ev, CONTRACT, now=NOW)
     assert result["verdict"] == "UNPROVED"
     assert result["reason"] == "rto"
 
@@ -77,7 +157,7 @@ def test_rto_breach():
 def test_data_verification_failure():
     ev = _base_evidence(scenario="noop-restore", blocked_at="verify")
     ev["checks"]["data_verification"] = False
-    result = evaluate(ev, CONTRACT, now=datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc))
+    result = evaluate(ev, CONTRACT, now=NOW)
     assert result["verdict"] == "UNPROVED"
     assert result["reason"] == "data_verification"
 
@@ -94,7 +174,47 @@ def test_configurable_rto_target():
     contract["rto_seconds_max"] = 20
     ev = _base_evidence()
     ev["metrics"]["rto_seconds"] = 25
-    result = evaluate(ev, contract, now=datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc))
+    result = evaluate(ev, contract, now=NOW)
     assert result["verdict"] == "UNPROVED"
     assert result["reason"] == "rto"
     assert result["metrics"]["rto_max_seconds"] == 20
+
+
+def test_schema_rejects_non_boolean_check():
+    ev = _base_evidence()
+    ev["checks"]["artifact_integrity"] = "true"
+    with pytest.raises(EvidenceSchemaError):
+        validate_evidence(ev)
+
+
+def test_main_non_proved_exit_nonzero(tmp_path: Path):
+    cfg = tmp_path / "contract.json"
+    cfg.write_text(
+        json.dumps(
+            {
+                "tagline": "Restore should be proved, not assumed.",
+                "lifecycle": "PROTECT → VALIDATE → RESTORE → PROVE",
+                "contract": CONTRACT,
+            }
+        )
+        + "\n"
+    )
+    ev_path = tmp_path / "drill.json"
+    ev = _base_evidence()
+    ev["checks"]["backup"] = False
+    ev_path.write_text(json.dumps(ev) + "\n")
+    out = tmp_path / "out"
+    rc = main(["evaluate_contract.py", str(ev_path), str(cfg), str(out)])
+    assert rc != 0
+    assert rc == 2
+
+
+def test_main_invalid_schema_exit_nonzero(tmp_path: Path):
+    cfg = tmp_path / "contract.json"
+    cfg.write_text(json.dumps({"contract": CONTRACT}) + "\n")
+    ev_path = tmp_path / "drill.json"
+    ev_path.write_text(json.dumps({"drill_id": 1}) + "\n")
+    out = tmp_path / "out"
+    rc = main(["evaluate_contract.py", str(ev_path), str(cfg), str(out)])
+    assert rc != 0
+    assert rc == 1

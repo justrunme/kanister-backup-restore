@@ -14,6 +14,137 @@ from pathlib import Path
 from typing import Any, Optional
 
 
+# Minimal JSON Schema (draft-07 subset) for drill evidence.
+# Validated by validate_evidence() without an external jsonschema dependency.
+EVIDENCE_SCHEMA: dict[str, Any] = {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "required": ["drill_id", "scenario", "collected_at", "checks", "metrics"],
+    "properties": {
+        "drill_id": {"type": "integer"},
+        "scenario": {"type": "string", "minLength": 1},
+        "blocked_at": {"type": ["string", "null"]},
+        "backup_actionset": {"type": ["string", "null"]},
+        "restore_actionset": {"type": ["string", "null"]},
+        "drill_namespace": {"type": ["string", "null"]},
+        "backup_location": {"type": ["string", "null"]},
+        "collected_at": {"type": "string", "minLength": 1},
+        "checks": {
+            "type": "object",
+            "required": [
+                "backup",
+                "artifact_integrity",
+                "restore_completed",
+                "application_health",
+                "data_verification",
+            ],
+            "properties": {
+                "backup": {"type": "boolean"},
+                "artifact_integrity": {"type": "boolean"},
+                "restore_completed": {"type": "boolean"},
+                "application_health": {"type": "boolean"},
+                "data_verification": {"type": "boolean"},
+                "rto_within_target": {"type": "boolean"},
+                "evidence_fresh": {"type": "boolean"},
+            },
+            "additionalProperties": True,
+        },
+        "metrics": {
+            "type": "object",
+            "required": ["rto_seconds"],
+            "properties": {
+                "rpo_seconds": {"type": ["integer", "null"]},
+                "rto_seconds": {"type": ["integer", "null"]},
+                "rto_target_seconds": {"type": ["integer", "null"]},
+                "evidence_age_hours": {"type": ["number", "null"]},
+                "drill_id": {"type": "integer"},
+            },
+            "additionalProperties": True,
+        },
+        "proof": {"type": ["object", "null"]},
+    },
+    "additionalProperties": True,
+}
+
+
+class EvidenceSchemaError(ValueError):
+    """Evidence JSON failed schema validation."""
+
+
+def _type_name(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, list):
+        return "array"
+    return type(value).__name__
+
+
+def _matches_type(value: Any, expected: str) -> bool:
+    if expected == "null":
+        return value is None
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":
+        return (isinstance(value, (int, float)) and not isinstance(value, bool))
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "object":
+        return isinstance(value, dict)
+    if expected == "array":
+        return isinstance(value, list)
+    return False
+
+
+def _validate_node(node: Any, schema: dict[str, Any], path: str) -> list[str]:
+    errors: list[str] = []
+    type_spec = schema.get("type")
+    if type_spec is not None:
+        allowed = type_spec if isinstance(type_spec, list) else [type_spec]
+        if not any(_matches_type(node, t) for t in allowed):
+            errors.append(
+                f"{path}: expected type {allowed}, got {_type_name(node)}"
+            )
+            return errors
+
+    if "minLength" in schema and isinstance(node, str):
+        if len(node) < int(schema["minLength"]):
+            errors.append(f"{path}: string shorter than minLength")
+
+    if isinstance(node, dict):
+        for key in schema.get("required", []):
+            if key not in node:
+                errors.append(f"{path}.{key}: required field missing")
+        props = schema.get("properties") or {}
+        for key, value in node.items():
+            if key in props:
+                errors.extend(_validate_node(value, props[key], f"{path}.{key}"))
+            elif schema.get("additionalProperties") is False:
+                errors.append(f"{path}.{key}: additional property not allowed")
+    return errors
+
+
+def validate_evidence(ev: Any, schema: Optional[dict[str, Any]] = None) -> None:
+    """Validate evidence against EVIDENCE_SCHEMA. Raises EvidenceSchemaError."""
+    sch = schema or EVIDENCE_SCHEMA
+    if not isinstance(ev, dict):
+        raise EvidenceSchemaError("evidence root must be an object")
+    errors = _validate_node(ev, sch, "$")
+    if errors:
+        raise EvidenceSchemaError("; ".join(errors))
+
+
 def parse_rfc3339(value: str) -> datetime:
     raw = value.strip()
     if raw.endswith("Z"):
@@ -22,24 +153,29 @@ def parse_rfc3339(value: str) -> datetime:
 
 
 def evidence_age_hours(ev: dict[str, Any], now: Optional[datetime] = None) -> float:
-    """Compute evidence age from collected_at (preferred) or metrics override."""
+    """Compute evidence age solely from collected_at.
+
+    Missing, unparseable, or future timestamps are treated as infinitely stale
+    (fail closed). metrics.evidence_age_hours is never trusted.
+    """
     collected = ev.get("collected_at")
-    if collected:
-        when = parse_rfc3339(str(collected))
-        ref = now or datetime.now(timezone.utc)
-        return max(0.0, (ref - when).total_seconds() / 3600.0)
-    metrics = ev.get("metrics") or {}
-    if "evidence_age_hours" in metrics and metrics["evidence_age_hours"] is not None:
-        return float(metrics["evidence_age_hours"])
-    # Missing freshness signal is a failure (treated as infinitely stale).
-    return float("inf")
+    if not collected or not isinstance(collected, str):
+        return float("inf")
+    try:
+        when = parse_rfc3339(collected)
+    except (TypeError, ValueError):
+        return float("inf")
+    ref = now or datetime.now(timezone.utc)
+    delta = (ref - when).total_seconds()
+    if delta < 0:
+        # Future timestamp — clock skew or tampering; fail closed.
+        return float("inf")
+    return delta / 3600.0
 
 
 def check_bool(checks: dict[str, Any], key: str) -> bool:
-    """Missing required checks fail closed (False)."""
-    if key not in checks:
-        return False
-    return bool(checks[key])
+    """Fail closed: only a literal JSON/Python True counts as pass."""
+    return checks.get(key) is True
 
 
 def evaluate(
@@ -47,7 +183,11 @@ def evaluate(
     contract: dict[str, Any],
     *,
     now: Optional[datetime] = None,
+    validate: bool = True,
 ) -> dict[str, Any]:
+    if validate:
+        validate_evidence(ev)
+
     checks = ev.get("checks") or {}
     metrics = ev.get("metrics") or {}
 
@@ -59,7 +199,13 @@ def evaluate(
 
     rto = metrics.get("rto_seconds")
     rto_max = int(contract["rto_seconds_max"])
-    rto_ok = restore_ok and rto is not None and int(rto) <= rto_max
+    rto_ok = (
+        restore_ok
+        and rto is not None
+        and isinstance(rto, int)
+        and not isinstance(rto, bool)
+        and int(rto) <= rto_max
+    )
 
     age_h = evidence_age_hours(ev, now=now)
     age_max = int(contract["evidence_freshness_hours_max"])
@@ -269,11 +415,16 @@ def main(argv: list[str]) -> int:
         print(f"No evidence JSON found at {evidence_path}", file=sys.stderr)
         return 1
 
-    ev = json.loads(evidence_path.read_text())
-    cfg = json.loads(cfg_path.read_text())
-    contract = cfg["contract"]
+    try:
+        ev = json.loads(evidence_path.read_text())
+        cfg = json.loads(cfg_path.read_text())
+        contract = cfg["contract"]
+        validate_evidence(ev)
+    except (json.JSONDecodeError, KeyError, TypeError, EvidenceSchemaError) as exc:
+        print(f"invalid evidence/contract: {exc}", file=sys.stderr)
+        return 1
 
-    evaluation = evaluate(ev, contract)
+    evaluation = evaluate(ev, contract, validate=False)
     report = render_report(ev, cfg, evaluation, str(evidence_path))
     write_outputs(report, out_dir, evaluation["raw_clauses"])
     print_card(report, evaluation["raw_clauses"])
