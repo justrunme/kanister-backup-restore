@@ -1,19 +1,33 @@
 {
   "repo": "kanister-backup-restore",
-  "source_run": "https://github.com/justrunme/kanister-backup-restore/actions/runs/38061727612",
-  "measured_at": "2026-10-10T15:01:01Z",
+  "source_run": "https://github.com/justrunme/kanister-backup-restore/actions/runs/38118145078",
+  "measured_at": "2026-10-11T06:30:25Z",
   "metrics": {
     "happy_path": {
       "k8s_v1.37.0": {
-        "rto_seconds": 16,
-        "rpo_seconds": 26,
-        "verdict": "PROVED"
+        "rto_seconds": 6,
+        "rpo_seconds": 12,
+        "verdict": "PROVED",
+        "backup_location": "pg_backups/demo-postgres/postgres/20261011T062954Z-a9d3f225-8415-4c3d-a4e8-9833a645089a/backup.sql.gz",
+        "backup_sha256": "6a8db462604d015d03548c662db2333c028fe9538e1f5a7fce113e13e0cb0aab",
+        "marker_uuid": "ad654415-eb35-4594-992f-c795c78fb617",
+        "restore_actionset": "restore-postgres-20261011063010",
+        "drill_namespace": "restore-drill-20261011063010"
       },
       "k8s_v1.36.4": {
-        "rto_seconds": 16,
-        "rpo_seconds": 25,
-        "verdict": "PROVED"
+        "rto_seconds": 5,
+        "rpo_seconds": 11,
+        "verdict": "PROVED",
+        "backup_location": "pg_backups/demo-postgres/postgres/20261011T062952Z-5765f570-85d3-4834-bbf4-6d028019a52c/backup.sql.gz",
+        "backup_sha256": "4cb900c8fb70b3954b3eaf800f6dfab0e59e3471962eb32fd8a1895e67cbb092",
+        "marker_uuid": "4e770ced-c9b6-4cad-a8b7-fa192130409c",
+        "restore_actionset": "restore-postgres-20261011063008",
+        "drill_namespace": "restore-drill-20261011063008"
       }
+    },
+    "failure_noop_restore": {
+      "verdict": "UNPROVED",
+      "reason": "data_verification"
     },
     "failure_corrupt_artifact": {
       "verdict": "UNPROVED",
