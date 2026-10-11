@@ -60,12 +60,14 @@ if [[ "$ACTION" == "validate" || "$ACTION" == "restore" ]]; then
     exit 1
   fi
   echo "using artifacts from ${FROM}: ${LOC}"
+  SHA="$(kubectl -n "$PROFILE_NS" get "actionset/${FROM}" -o jsonpath='{.status.actions[0].artifacts.cloudObject.keyValue.backupSha256}' 2>/dev/null || true)"
   ARTIFACTS_BLOCK=$(
     cat <<EOF
       artifacts:
         cloudObject:
           keyValue:
             backupLocation: "${LOC}"
+            backupSha256: "${SHA}"
             namespace: "${NS}"
             name: "${NAME}"
 EOF

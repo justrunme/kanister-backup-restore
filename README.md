@@ -102,6 +102,7 @@ make failure-drill SCENARIO=corrupt-artifact
 make failure-drill SCENARIO=wrong-secret
 make failure-drill SCENARIO=schema-drift
 make failure-drill SCENARIO=slow-restore
+make failure-drill SCENARIO=noop-restore
 ```
 
 Example (corrupt artifact):
@@ -120,6 +121,7 @@ Reason                 artifact_integrity
 | `wrong-secret` | `isolated_restore` | Credentials are part of the contract |
 | `schema-drift` | `data_verification` | Bytes restored ≠ application verified |
 | `slow-restore` | `rto` | Success without RTO still UNPROVED |
+| `noop-restore` | `data_verification` | A completed restore ActionSet is not proof without the pre-backup marker |
 
 ---
 

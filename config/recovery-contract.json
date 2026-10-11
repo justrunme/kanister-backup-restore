@@ -27,6 +27,10 @@
     "slow-restore": {
       "description": "Inject delay so RTO exceeds contract",
       "expected_reason": "rto"
+    },
+    "noop-restore": {
+      "description": "Restore ActionSet completes without applying data so DATA VERIFY fails",
+      "expected_reason": "data_verification"
     }
   }
 }

@@ -6,11 +6,12 @@ Prove restore works **before** an incident — on Kind or a non-prod cluster.
 
 ## Pass criteria
 
-- [ ] Backup ActionSet `complete`
-- [ ] Validate ActionSet `complete` (`gzip -t` + SQL head)
-- [ ] Restore ActionSet `complete` in `restore-drill-*`
-- [ ] `recovery_markers` rows visible in drill namespace
-- [ ] Evidence markdown captured
+- [ ] Unique proof marker written to the source DB immediately before backup
+- [ ] Backup ActionSet `complete` with unique object key + recorded `sha256`
+- [ ] Validate ActionSet `complete` (`sha256` match + scratch SQL restore)
+- [ ] Restore ActionSet `complete` into an **unseeded** `restore-drill-*` namespace
+- [ ] Exact marker row found; row count / checksum match source
+- [ ] Evaluator exits 0 (`PROVED`); evidence under `.evidence/`
 
 ## Fast path
 
@@ -29,12 +30,21 @@ make restore-drill
 make evidence
 ```
 
+## Negative proof
+
+```bash
+make failure-drill SCENARIO=noop-restore
+# expect UNPROVED reason=data_verification
+```
+
 ## Fail criteria
 
 - ActionSet `failed` / stuck `running`
-- Empty `backupLocation`
+- Empty `backupLocation` or missing `backupSha256`
 - Skipping validate “because backup looked fine”
 - Restoring into the production namespace
+- Seeded restore DB that already contains markers (false positive)
+- Evaluator exits 0 on UNPROVED
 
 ## Cleanup
 

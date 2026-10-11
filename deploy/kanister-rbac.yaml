@@ -1,4 +1,7 @@
 # Extra RBAC the 0.118 Helm chart does not grant: Profile secrets and KubeTask jobs.
+# Scoped to namespaced resources where possible; namespaces create/delete only for
+# labeled restore-drill namespaces is not expressible in RBAC, so namespace verbs
+# stay limited to get/list/watch/create/delete (no *).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -15,18 +18,20 @@ rules:
       - services
       - configmaps
       - persistentvolumeclaims
-      - namespaces
       - events
-    verbs: ["*"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch", "create", "delete"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
-    verbs: ["*"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["apps"]
     resources: ["statefulsets", "deployments", "replicasets"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["cr.kanister.io"]
-    resources: ["*"]
-    verbs: ["*"]
+    resources: ["blueprints", "profiles", "actionsets", "actionsets/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
