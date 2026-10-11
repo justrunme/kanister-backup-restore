@@ -142,3 +142,20 @@ def test_generation_drift_fails():
     assert result["ok"] is False
     assert any("generation drift" in e for e in result["errors"])
 
+
+
+def test_empty_rows_fails():
+    result = prove(
+        pg_rows=[],
+        pg_generation=1,
+        restored_objects={},
+        rp_manifest=_manifest(
+            1,
+            [{"object_key": "k", "sha256": "a"*64}],
+            "2026-10-11T12:00:00Z",
+            "2026-10-11T12:00:00Z",
+        ),
+        skew_max_seconds=60,
+    )
+    assert result["ok"] is False
+    assert any("empty postgres" in e for e in result["errors"])

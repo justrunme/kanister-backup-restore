@@ -77,7 +77,7 @@ assert "postgres" in cfg["components"] and "s3" in cfg["components"]
 assert "solr" in cfg.get("future", [])
 for s in ("noop-restore","delete-s3-object","corrupt-s3-object","mismatched-recovery-points"):
     assert s in cfg["failure_scenarios"], s
-assert cfg["failure_scenarios"]["delete-s3-object"]["expected_reason"] == "cross_component_consistency"
+assert cfg["failure_scenarios"]["delete-s3-object"]["expected_reason"] == "isolated_restore"
 assert "weights" not in cfg
 print("contract ok", c)
 PY
@@ -109,7 +109,7 @@ p.write_text(json.dumps({
     "rto_within_target": True,
     "evidence_fresh": True
   },
-  "metrics": {"rpo_seconds": 221, "rto_seconds": 38, "drill_id": 42},
+  "metrics": {"component_skew_seconds": 221, "rto_seconds": 38, "drill_id": 42},
   "proof": {"marker_uuid": "00000000-0000-0000-0000-000000000042"}
 }) + "\n")
 fail = pathlib.Path(".evidence-ci/drill-fail.json")
@@ -131,7 +131,7 @@ fail.write_text(json.dumps({
     "rto_within_target": False,
     "evidence_fresh": True
   },
-  "metrics": {"rpo_seconds": 10, "rto_seconds": 0, "drill_id": 43}
+  "metrics": {"component_skew_seconds": 10, "rto_seconds": 0, "drill_id": 43}
 }) + "\n")
 stale_p = pathlib.Path(".evidence-ci/drill-stale.json")
 stale_p.write_text(json.dumps({
@@ -148,7 +148,7 @@ stale_p.write_text(json.dumps({
     "rto_within_target": True,
     "evidence_fresh": True
   },
-  "metrics": {"rpo_seconds": 1, "rto_seconds": 10, "drill_id": 44}
+  "metrics": {"component_skew_seconds": 1, "rto_seconds": 10, "drill_id": 44}
 }) + "\n")
 missing = pathlib.Path(".evidence-ci/drill-missing.json")
 missing.write_text(json.dumps({
@@ -161,7 +161,7 @@ missing.write_text(json.dumps({
     "application_health": True,
     "data_verification": True
   },
-  "metrics": {"rpo_seconds": 1, "rto_seconds": 10, "drill_id": 45}
+  "metrics": {"component_skew_seconds": 1, "rto_seconds": 10, "drill_id": 45}
 }) + "\n")
 falsey = pathlib.Path(".evidence-ci/drill-backup-false.json")
 falsey.write_text(json.dumps({
@@ -175,7 +175,7 @@ falsey.write_text(json.dumps({
     "application_health": True,
     "data_verification": True
   },
-  "metrics": {"rpo_seconds": 1, "rto_seconds": 10, "drill_id": 46}
+  "metrics": {"component_skew_seconds": 1, "rto_seconds": 10, "drill_id": 46}
 }) + "\n")
 str_false = pathlib.Path(".evidence-ci/drill-backup-string.json")
 str_false.write_text(json.dumps({
@@ -189,7 +189,7 @@ str_false.write_text(json.dumps({
     "application_health": True,
     "data_verification": True
   },
-  "metrics": {"rpo_seconds": 1, "rto_seconds": 10, "drill_id": 47}
+  "metrics": {"component_skew_seconds": 1, "rto_seconds": 10, "drill_id": 47}
 }) + "\n")
 PY
 
@@ -277,6 +277,52 @@ grep -q 'kando location push' blueprints/postgres/blueprint.yaml || fail=1
   echo "stale compute-confidence.sh" >&2
   fail=1
 }
+
+echo "== operator RBAC least privilege =="
+python3 - <<'PY' || fail=1
+from pathlib import Path
+import re
+text = Path("deploy/operator.yaml").read_text()
+docs = [d.strip() for d in text.split("---") if d.strip()]
+cluster_roles = {}
+cluster_bindings = []
+for d in docs:
+    kind_m = re.search(r"^kind:\s*(\S+)", d, re.M)
+    if not kind_m:
+        continue
+    kind = kind_m.group(1)
+    meta = re.search(r"metadata:\s*\n\s*name:\s*(\S+)", d)
+    name = meta.group(1) if meta else ""
+    if kind == "ClusterRole":
+        cluster_roles[name] = d
+    elif kind == "ClusterRoleBinding":
+        cluster_bindings.append(d)
+for b in cluster_bindings:
+    rm = re.search(r"roleRef:\s*\n(?:\s+.+\n)*?\s+name:\s*(\S+)", b)
+    if not rm:
+        raise SystemExit("ClusterRoleBinding missing roleRef name")
+    role_name = rm.group(1)
+    body = cluster_roles.get(role_name, "")
+    # Only the rules list matters (ignore comments)
+    rules = body.split("rules:", 1)[-1] if "rules:" in body else body
+    if re.search(r"\bsecrets\b", rules):
+        raise SystemExit(f"ClusterRoleBinding must not grant secrets via {role_name}")
+if "kind: Role" not in text:
+    raise SystemExit("namespaced Role missing")
+drill = Path("scripts/app-recovery-drill.sh").read_text()
+if '"postgres": True, "s3": True' in drill:
+    raise SystemExit("components hardcoded True")
+if "component_skew_seconds" not in drill:
+    raise SystemExit("component_skew_seconds missing from drill evidence")
+# Drill ClusterRole with secrets must only be RoleBound (namespaced), not ClusterRoleBound
+drill_role = "recovery-contract-operator-drill"
+for b in cluster_bindings:
+    if re.search(rf"name:\s*{re.escape(drill_role)}\s*$", b, re.M):
+        # roleRef name line
+        if re.search(rf"roleRef:[\s\S]*?name:\s*{re.escape(drill_role)}", b):
+            raise SystemExit(f"{drill_role} must not be ClusterRoleBound")
+print("✓ operator RBAC + component evidence checks")
+PY
 
 if [[ "$fail" -ne 0 ]]; then
   echo "ci failed" >&2

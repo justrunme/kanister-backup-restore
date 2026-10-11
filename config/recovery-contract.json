@@ -2,7 +2,7 @@
   "version": 2,
   "name": "recovery-contract",
   "tagline": "Restore should be proved, not assumed.",
-  "lifecycle": "PROTECT → VALIDATE → RESTORE → PROVE",
+  "lifecycle": "PROTECT \u2192 VALIDATE \u2192 RESTORE \u2192 PROVE",
   "contract": {
     "artifact_integrity": "required",
     "isolated_restore": "required",
@@ -13,8 +13,13 @@
     "evidence_freshness_hours_max": 24,
     "recovery_point_skew_seconds_max": 60
   },
-  "components": ["postgres", "s3"],
-  "future": ["solr"],
+  "components": [
+    "postgres",
+    "s3"
+  ],
+  "future": [
+    "solr"
+  ],
   "failure_scenarios": {
     "corrupt-artifact": {
       "description": "Corrupt object-store artifact so VALIDATE fails",
@@ -37,8 +42,8 @@
       "expected_reason": "data_verification"
     },
     "delete-s3-object": {
-      "description": "Delete one S3 object from the recovery point after backup",
-      "expected_reason": "cross_component_consistency"
+      "description": "Delete one S3 object from the recovery point after backup so S3 restore fails",
+      "expected_reason": "isolated_restore"
     },
     "corrupt-s3-object": {
       "description": "Corrupt one S3 object in the recovery point after backup",

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Compute `components.postgres` / `components.s3` from real restore+verification results (never hardcode true); CI asserts `s3=false` on delete-s3-object
+- Scope operator RBAC: namespaced Role in kanister + per-namespace RoleBindings for drill ns (no cluster-wide secrets)
+- Rename `rpo_seconds` → `component_skew_seconds` (honest RPO not claimed without last-write timestamp)
+- `restore_completed` requires Postgres and S3 restore; S3 restore lands in a fresh app prefix the app check reads
+- Operator runs drills asynchronously (`DRILL_INLINE`/Job); clears stuck `phase=Running`; `break.sh` failures fail the operator; kind CI asserts status
+- Secret-leak check fails if zero pods checked; `prove_consistency` fails on empty data; remove empty-array masking
+
 ## [1.2.0] - 2026-10-11
 
 Multi-service Application Recovery Contract (Postgres + S3):

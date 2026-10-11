@@ -41,8 +41,8 @@ failure_scenarios:
     description: Restore ActionSet completes without applying data so DATA VERIFY fails
     expected_reason: data_verification
   delete-s3-object:
-    description: Delete one S3 object from the recovery point after backup
-    expected_reason: cross_component_consistency
+    description: Delete one S3 object from the recovery point after backup so S3 restore fails
+    expected_reason: isolated_restore
   corrupt-s3-object:
     description: Corrupt one S3 object in the recovery point after backup
     expected_reason: cross_component_consistency

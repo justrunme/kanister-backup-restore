@@ -170,7 +170,7 @@ ev = {
     "evidence_fresh": b(c_fresh),
   },
   "metrics": {
-    "rpo_seconds": ni(rpo),
+    "component_skew_seconds": ni(rpo),
     "rto_seconds": ni(rto),
     "rto_target_seconds": ni(rto_target),
     "drill_id": int(drill_id),

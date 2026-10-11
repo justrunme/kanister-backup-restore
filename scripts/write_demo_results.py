@@ -19,7 +19,7 @@ payload = {
     "measured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     "metrics": {
         "rto_seconds": metrics.get("rto_seconds"),
-        "rpo_seconds": metrics.get("rpo_seconds"),
+        "component_skew_seconds": metrics.get("component_skew_seconds"),
         "scenario": (happy or {}).get("scenario", "unknown"),
         "checks": (happy or {}).get("checks", {}),
     },
