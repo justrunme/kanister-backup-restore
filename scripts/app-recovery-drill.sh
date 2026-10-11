@@ -146,7 +146,7 @@ finish() {
   while read -r ns pod; do
     [[ -z "${ns:-}" || -z "${pod:-}" ]] && continue
     kubectl -n "$ns" logs "$pod" --tail=200 >"$LOG_DIR/${ns}_${pod}.log" 2>/dev/null || true
-  done < <(kubectl get pods -A --no-headers 2>/dev/null | awk '/kanister/{print $1,$2}')
+  done < <(kubectl get pods -A --no-headers 2>/dev/null | awk '/kanister-job/{print $1,$2}')
   if [[ "${KEEP_DRILL_NS:-}" == "1" ]]; then
     echo "-- KEEP_DRILL_NS=1: leaving restore-drill namespaces for post-checks"
   else
