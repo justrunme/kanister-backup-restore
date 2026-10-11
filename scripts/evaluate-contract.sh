@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Evaluate drill evidence against the Recovery Contract.
 # Verdict: PROVED | UNPROVED (binary — never a percentage).
-# Exit: 0 = PROVED, 2 = UNPROVED, 1 = error.
+# Exit: 0 = PROVED, 2 = UNPROVED, 3 = UNPROVED (recovery_point_skew), 1 = error.
 # Usage: evaluate-contract.sh [evidence.json]
 set -euo pipefail
 

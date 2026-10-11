@@ -91,6 +91,7 @@ now = datetime.now(timezone.utc)
 fresh = (now - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
 stale = (now - timedelta(hours=25)).strftime("%Y-%m-%dT%H:%M:%SZ")
 p = pathlib.Path(".evidence-ci/drill-latest.json")
+# component_skew_seconds=13 from measured happy-path (docs/results.json, k8s v1.37.0)
 p.write_text(json.dumps({
   "drill_id": 42,
   "scenario": "happy-path",
@@ -100,16 +101,18 @@ p.write_text(json.dumps({
   "drill_namespace": "restore-drill-x",
   "backup_location": "pg_backups/demo/postgres/run/backup.sql.gz",
   "collected_at": fresh,
+  "components": {"postgres": True, "s3": True},
   "checks": {
     "backup": True,
     "artifact_integrity": True,
     "restore_completed": True,
     "application_health": True,
     "data_verification": True,
+    "cross_component_consistency": True,
     "rto_within_target": True,
     "evidence_fresh": True
   },
-  "metrics": {"component_skew_seconds": 221, "rto_seconds": 38, "drill_id": 42},
+  "metrics": {"component_skew_seconds": 13, "rto_seconds": 38, "drill_id": 42},
   "proof": {"marker_uuid": "00000000-0000-0000-0000-000000000042"}
 }) + "\n")
 fail = pathlib.Path(".evidence-ci/drill-fail.json")
@@ -191,6 +194,31 @@ str_false.write_text(json.dumps({
   },
   "metrics": {"component_skew_seconds": 1, "rto_seconds": 10, "drill_id": 47}
 }) + "\n")
+# NEGATIVE: skew above recovery_point_skew_seconds_max (60) → UNPROVED / exit 3
+skew_breach = pathlib.Path(".evidence-ci/drill-skew-breach.json")
+skew_breach.write_text(json.dumps({
+  "drill_id": 48,
+  "scenario": "happy-path",
+  "blocked_at": None,
+  "backup_actionset": "backup-x",
+  "restore_actionset": "restore-x",
+  "drill_namespace": "restore-drill-x",
+  "backup_location": "pg_backups/demo/postgres/run/backup.sql.gz",
+  "collected_at": fresh,
+  "components": {"postgres": True, "s3": True},
+  "checks": {
+    "backup": True,
+    "artifact_integrity": True,
+    "restore_completed": True,
+    "application_health": True,
+    "data_verification": True,
+    "cross_component_consistency": True,
+    "rto_within_target": True,
+    "evidence_fresh": True
+  },
+  "metrics": {"component_skew_seconds": 221, "rto_seconds": 38, "drill_id": 48},
+  "proof": {"marker_uuid": "00000000-0000-0000-0000-000000000048"}
+}) + "\n")
 PY
 
 set +e
@@ -206,6 +234,8 @@ EVIDENCE_DIR=.evidence-ci ./scripts/evaluate-contract.sh .evidence-ci/drill-back
 RC_FALSE=${PIPESTATUS[0]}
 EVIDENCE_DIR=.evidence-ci ./scripts/evaluate-contract.sh .evidence-ci/drill-backup-string.json >/tmp/rc-strfalse.out 2>&1
 RC_STRFALSE=$?
+EVIDENCE_DIR=.evidence-ci ./scripts/evaluate-contract.sh .evidence-ci/drill-skew-breach.json | tee /tmp/rc-skew.out
+RC_SKEW=${PIPESTATUS[0]}
 set -e
 
 [[ "$RC_PROVE" -eq 0 ]] || {
@@ -242,16 +272,24 @@ grep -q 'backup' /tmp/rc-false.out || fail=1
   echo "expected exit 1 for backup=\"false\" string, got $RC_STRFALSE" >&2
   fail=1
 }
+# Skew above ceiling → UNPROVED / recovery_point_skew (exit 3)
+[[ "$RC_SKEW" -eq 3 ]] || {
+  echo "expected exit 3 for skew breach, got $RC_SKEW" >&2
+  fail=1
+}
+grep -q 'UNPROVED' /tmp/rc-skew.out || fail=1
+grep -q 'recovery_point_skew' /tmp/rc-skew.out || fail=1
 rm -rf .evidence-ci
 
 echo "== evaluate_contract + prove_consistency unit tests =="
-if python3 -m pytest -q scripts/test_evaluate_contract.py scripts/test_prove_consistency.py; then
-  :
-else
-  if ! python3 -c 'import sys; sys.path.insert(0,"scripts"); from evaluate_contract import evaluate; from prove_consistency import prove; print("import ok")'; then
+run_unit_tests() {
+  (cd scripts && python3 -m pytest -q test_evaluate_contract.py test_prove_consistency.py)
+}
+if ! run_unit_tests; then
+  # Fallback: install pytest and run the real suite — never import-only smoke.
+  python3 -m pip install --user -q pytest
+  if ! run_unit_tests; then
     fail=1
-  else
-    echo "pytest not available; import smoke only" >&2
   fi
 fi
 
