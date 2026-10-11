@@ -104,20 +104,3 @@ subjects:
   - kind: ServiceAccount
     name: recovery-contract-operator
     namespace: kanister
----
-# Demo app namespace: bind drill ClusterRole via RoleBinding (namespaced secrets only).
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: recovery-contract-operator-drill
-  namespace: demo-postgres
-  labels:
-    app.kubernetes.io/name: kanister-backup-restore
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: recovery-contract-operator-drill
-subjects:
-  - kind: ServiceAccount
-    name: recovery-contract-operator
-    namespace: kanister
