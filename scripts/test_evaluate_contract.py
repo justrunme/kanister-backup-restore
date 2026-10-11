@@ -24,8 +24,10 @@ CONTRACT = {
     "isolated_restore": "required",
     "application_ready": "required",
     "data_verification": "required",
+    "cross_component_consistency": "required",
     "rto_seconds_max": 60,
     "evidence_freshness_hours_max": 24,
+    "recovery_point_skew_seconds_max": 60,
 }
 
 NOW = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
@@ -152,6 +154,126 @@ def test_rto_breach():
     result = evaluate(ev, CONTRACT, now=NOW)
     assert result["verdict"] == "UNPROVED"
     assert result["reason"] == "rto"
+
+
+def test_skew_above_ceiling_unproved():
+    """NEGATIVE: component_skew_seconds above contract max → recovery_point_skew."""
+    ev = _base_evidence(
+        components={"postgres": True, "s3": True},
+        checks={
+            "backup": True,
+            "artifact_integrity": True,
+            "restore_completed": True,
+            "application_health": True,
+            "data_verification": True,
+            "cross_component_consistency": True,
+            "rto_within_target": True,
+            "evidence_fresh": True,
+        },
+    )
+    # 221s exceeds recovery_point_skew_seconds_max=60 (from prior CI fixture).
+    ev["metrics"]["component_skew_seconds"] = 221
+    result = evaluate(ev, CONTRACT, now=NOW)
+    assert result["verdict"] == "UNPROVED"
+    assert result["reason"] == "recovery_point_skew"
+    assert result["metrics"]["recovery_point_skew_seconds_max"] == 60
+
+
+def test_skew_missing_multi_service_unproved():
+    """NEGATIVE: multi-service evidence without skew → recovery_point_skew."""
+    ev = _base_evidence(
+        components={"postgres": True, "s3": True},
+        checks={
+            "backup": True,
+            "artifact_integrity": True,
+            "restore_completed": True,
+            "application_health": True,
+            "data_verification": True,
+            "cross_component_consistency": True,
+            "rto_within_target": True,
+            "evidence_fresh": True,
+        },
+    )
+    del ev["metrics"]["component_skew_seconds"]
+    result = evaluate(ev, CONTRACT, now=NOW)
+    assert result["verdict"] == "UNPROVED"
+    assert result["reason"] == "recovery_point_skew"
+
+
+def test_skew_null_multi_service_unproved():
+    """NEGATIVE: null skew with postgres+s3 → recovery_point_skew."""
+    ev = _base_evidence(
+        components={"postgres": True, "s3": True},
+        checks={
+            "backup": True,
+            "artifact_integrity": True,
+            "restore_completed": True,
+            "application_health": True,
+            "data_verification": True,
+            "cross_component_consistency": True,
+            "rto_within_target": True,
+            "evidence_fresh": True,
+        },
+    )
+    ev["metrics"]["component_skew_seconds"] = None
+    result = evaluate(ev, CONTRACT, now=NOW)
+    assert result["verdict"] == "UNPROVED"
+    assert result["reason"] == "recovery_point_skew"
+
+
+def test_multi_service_in_bound_skew_proved():
+    """Measured happy-path skew (13s) within ceiling remains PROVED."""
+    ev = _base_evidence(
+        components={"postgres": True, "s3": True},
+        checks={
+            "backup": True,
+            "artifact_integrity": True,
+            "restore_completed": True,
+            "application_health": True,
+            "data_verification": True,
+            "cross_component_consistency": True,
+            "rto_within_target": True,
+            "evidence_fresh": True,
+        },
+    )
+    ev["metrics"]["component_skew_seconds"] = 13
+    result = evaluate(ev, CONTRACT, now=NOW)
+    assert result["verdict"] == "PROVED"
+    assert result["reason"] is None
+
+
+def test_main_skew_breach_exit_3(tmp_path: Path):
+    """NEGATIVE: main() exits 3 when reason is recovery_point_skew."""
+    cfg = tmp_path / "contract.json"
+    cfg.write_text(
+        json.dumps(
+            {
+                "tagline": "Restore should be proved, not assumed.",
+                "lifecycle": "PROTECT → VALIDATE → RESTORE → PROVE",
+                "contract": CONTRACT,
+            }
+        )
+        + "\n"
+    )
+    ev_path = tmp_path / "drill.json"
+    ev = _base_evidence(
+        components={"postgres": True, "s3": True},
+        checks={
+            "backup": True,
+            "artifact_integrity": True,
+            "restore_completed": True,
+            "application_health": True,
+            "data_verification": True,
+            "cross_component_consistency": True,
+            "rto_within_target": True,
+            "evidence_fresh": True,
+        },
+    )
+    ev["metrics"]["component_skew_seconds"] = 221
+    ev_path.write_text(json.dumps(ev) + "\n")
+    out = tmp_path / "out"
+    rc = main(["evaluate_contract.py", str(ev_path), str(cfg), str(out)])
+    assert rc == 3
 
 
 def test_data_verification_failure():

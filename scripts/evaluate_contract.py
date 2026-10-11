@@ -2,7 +2,8 @@
 """Evaluate drill evidence against the Recovery Contract.
 
 Verdict is binary: PROVED | UNPROVED.
-Exit codes: 0 = PROVED, 2 = UNPROVED, 1 = usage/input error.
+Exit codes: 0 = PROVED, 2 = UNPROVED, 3 = UNPROVED (recovery_point_skew),
+1 = usage/input error.
 """
 
 from __future__ import annotations
@@ -227,6 +228,22 @@ def evaluate(
     ) or ("cross_component_consistency" in checks)
     consistency_ok = check_bool(checks, "cross_component_consistency")
 
+    skew = metrics.get("component_skew_seconds")
+    skew_max = int(contract["recovery_point_skew_seconds_max"])
+    skew_is_int = (
+        skew is not None
+        and isinstance(skew, int)
+        and not isinstance(skew, bool)
+    )
+    # Fail closed: skew above ceiling always fails; missing skew fails when
+    # multi-service recovery (postgres + s3) is in evidence.
+    if multi_service:
+        skew_ok = skew_is_int and int(skew) <= skew_max
+    elif skew is None:
+        skew_ok = True
+    else:
+        skew_ok = skew_is_int and int(skew) <= skew_max
+
     clauses = [
         ("backup", backup_ok, "required"),
         ("artifact_integrity", artifact_ok, "required"),
@@ -239,6 +256,7 @@ def evaluate(
             ("cross_component_consistency", consistency_ok, "required")
         )
     clauses += [
+        ("recovery_point_skew", skew_ok, f"< {skew_max}s"),
         ("rto", rto_ok, f"< {rto_max}s"),
         ("evidence_freshness", fresh_ok, f"< {age_max}h"),
     ]
@@ -295,6 +313,7 @@ def evaluate(
         "clauses": [{"name": n, "ok": ok, "requirement": req} for n, ok, req in clauses],
         "metrics": {
             "component_skew_seconds": metrics.get("component_skew_seconds"),
+            "recovery_point_skew_seconds_max": skew_max,
             "rto_seconds": rto,
             "rto_max_seconds": rto_max,
             "evidence_age_hours": None if age_h == float("inf") else age_h,
@@ -461,6 +480,8 @@ def main(argv: list[str]) -> int:
 
     if evaluation["verdict"] == "PROVED":
         return 0
+    if evaluation["reason"] == "recovery_point_skew":
+        return 3
     return 2
 
 
