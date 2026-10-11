@@ -14,7 +14,7 @@ else
 fi
 
 case "$SCENARIO" in
-  corrupt-artifact | wrong-secret | schema-drift | slow-restore) ;;
+  corrupt-artifact | wrong-secret | schema-drift | slow-restore | noop-restore) ;;
   "" | help | -h | --help)
     cat <<EOF
 Usage: make failure-drill SCENARIO=<name>
@@ -24,6 +24,7 @@ Scenarios:
   wrong-secret      RESTORE fails · UNPROVED
   schema-drift      DATA VERIFY fails · UNPROVED
   slow-restore      RTO exceeds contract · UNPROVED
+  noop-restore      Restore no-op · DATA VERIFY fails · UNPROVED
 EOF
     exit 1
     ;;

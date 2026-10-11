@@ -14,6 +14,9 @@ actions:
       cloudObject:
         keyValue:
           backupLocation: "{{ .Phases.pgDump.Output.backupLocation }}"
+          backupSha256: "{{ .Phases.pgDump.Output.backupSha256 }}"
+          backupBytes: "{{ .Phases.pgDump.Output.backupBytes }}"
+          backupTimestamp: "{{ .Phases.pgDump.Output.backupTimestamp }}"
           namespace: "{{ .StatefulSet.Namespace }}"
           name: "{{ .StatefulSet.Name }}"
     phases:
@@ -35,25 +38,32 @@ actions:
             - pipefail
             - -c
             - |
-              set -euxo pipefail
+              set -euo pipefail
               export AWS_EC2_METADATA_DISABLED=true
               export PGHOST="postgres.{{ .StatefulSet.Namespace }}.svc.cluster.local"
               export PGPORT="5432"
               export PGUSER='{{ index .Phases.pgDump.Secrets.pgSecret.Data "POSTGRES_USER" | toString }}'
               export PGPASSWORD='{{ index .Phases.pgDump.Secrets.pgSecret.Data "POSTGRES_PASSWORD" | toString }}'
               export PGDATABASE='{{ index .Phases.pgDump.Secrets.pgSecret.Data "POSTGRES_DB" | toString }}'
-              BACKUP_LOCATION="pg_backups/{{ .StatefulSet.Namespace }}/{{ .StatefulSet.Name }}/backup.sql.gz"
-              PROFILE_JSON='{"Location":{"type":"s3Compliant","bucket":"kanister-drills","endpoint":"http://seaweedfs.kanister.svc.cluster.local:8333","prefix":"drills/","region":"us-east-1"},"Credential":{"Type":"keyPair","KeyPair":{"ID":"admin","Secret":"admin12345"}},"SkipSSLVerify":true}'
+              RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(cat /proc/sys/kernel/random/uuid 2>/dev/null || od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+              BACKUP_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              BACKUP_LOCATION="pg_backups/{{ .StatefulSet.Namespace }}/{{ .StatefulSet.Name }}/${RUN_ID}/backup.sql.gz"
               echo "START backup host=${PGHOST} db=${PGDATABASE} path=${BACKUP_LOCATION}"
               pg_dump --clean --if-exists -U "${PGUSER}" "${PGDATABASE}" | gzip -c > /tmp/backup.sql.gz
-              echo "dump bytes=$(wc -c < /tmp/backup.sql.gz)"
-              if ! kando location push /tmp/backup.sql.gz --profile "${PROFILE_JSON}" --path "${BACKUP_LOCATION}" > /tmp/kando.out 2>&1; then
+              BYTES="$(wc -c < /tmp/backup.sql.gz | tr -d ' ')"
+              SHA256="$(sha256sum /tmp/backup.sql.gz | awk '{print $1}')"
+              echo "dump bytes=${BYTES} sha256=${SHA256}"
+              if ! kando location push /tmp/backup.sql.gz --profile '{{ toJson .Profile }}' --path "${BACKUP_LOCATION}" > /tmp/kando.out 2>&1; then
                 echo "kando push failed"
                 grep -iE 'error|fail|denied|unable|invalid|missing|forbidden|connect' /tmp/kando.out || tail -20 /tmp/kando.out
                 exit 1
               fi
-              cat /tmp/kando.out
+              # Do not dump full kando output (may contain profile material).
+              echo "kando push ok"
               kando output backupLocation "${BACKUP_LOCATION}"
+              kando output backupSha256 "${SHA256}"
+              kando output backupBytes "${BYTES}"
+              kando output backupTimestamp "${BACKUP_TS}"
 
   validate:
     kind: StatefulSet
@@ -62,6 +72,11 @@ actions:
     phases:
       - func: KubeTask
         name: checkArtifact
+        objects:
+          pgSecret:
+            kind: Secret
+            name: postgres-credentials
+            namespace: "{{ .StatefulSet.Namespace }}"
         args:
           image: ghcr.io/kanisterio/postgres-kanister-tools:0.118.0
           namespace: "{{ .StatefulSet.Namespace }}"
@@ -73,22 +88,55 @@ actions:
             - pipefail
             - -c
             - |
-              set -euxo pipefail
+              set -euo pipefail
               export AWS_EC2_METADATA_DISABLED=true
+              export PGHOST="postgres.{{ .StatefulSet.Namespace }}.svc.cluster.local"
+              export PGPORT="5432"
+              export PGUSER='{{ index .Phases.checkArtifact.Secrets.pgSecret.Data "POSTGRES_USER" | toString }}'
+              export PGPASSWORD='{{ index .Phases.checkArtifact.Secrets.pgSecret.Data "POSTGRES_PASSWORD" | toString }}'
               BACKUP_LOCATION='{{ .ArtifactsIn.cloudObject.KeyValue.backupLocation }}'
-              PROFILE_JSON='{"Location":{"type":"s3Compliant","bucket":"kanister-drills","endpoint":"http://seaweedfs.kanister.svc.cluster.local:8333","prefix":"drills/","region":"us-east-1"},"Credential":{"Type":"keyPair","KeyPair":{"ID":"admin","Secret":"admin12345"}},"SkipSSLVerify":true}'
+              EXPECTED_SHA='{{ .ArtifactsIn.cloudObject.KeyValue.backupSha256 }}'
               echo "START validate path=${BACKUP_LOCATION}"
-              if ! kando location pull /tmp/backup.sql.gz --profile "${PROFILE_JSON}" --path "${BACKUP_LOCATION}" > /tmp/kando.out 2>&1; then
+              if ! kando location pull /tmp/backup.sql.gz --profile '{{ toJson .Profile }}' --path "${BACKUP_LOCATION}" > /tmp/kando.out 2>&1; then
                 echo "kando pull failed"
                 grep -iE 'error|fail|denied|unable|invalid|missing|forbidden|connect' /tmp/kando.out || tail -20 /tmp/kando.out
                 exit 1
               fi
+              ACTUAL_SHA="$(sha256sum /tmp/backup.sql.gz | awk '{print $1}')"
+              echo "sha256 actual=${ACTUAL_SHA} expected=${EXPECTED_SHA}"
+              if [[ -z "${EXPECTED_SHA}" || "${EXPECTED_SHA}" == "<no value>" ]]; then
+                echo "missing backupSha256 artifact metadata" >&2
+                exit 1
+              fi
+              if [[ "${ACTUAL_SHA}" != "${EXPECTED_SHA}" ]]; then
+                echo "sha256 mismatch" >&2
+                exit 1
+              fi
               gzip -t /tmp/backup.sql.gz
-              echo "gzip integrity ok"
-              HEAD="$(gunzip -c /tmp/backup.sql.gz | head -c 64 | tr -d '\0' || true)"
-              echo "dump head: ${HEAD}"
-              echo "${HEAD}" | grep -Eqi 'postgres|create|drop|set |--'
-              echo "validation ok"
+              # Real integrity: restore plain SQL dump into a scratch database.
+              for i in $(seq 1 60); do
+                if pg_isready -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}"; then
+                  break
+                fi
+                sleep 2
+              done
+              SCRATCH="validate_scratch_$$"
+              psql -v ON_ERROR_STOP=1 -w -h "${PGHOST}" -U "${PGUSER}" -d postgres \
+                -c "DROP DATABASE IF EXISTS ${SCRATCH};" \
+                -c "CREATE DATABASE ${SCRATCH};"
+              gunzip -c -f /tmp/backup.sql.gz \
+                | grep -v -E 'transaction_timeout' \
+                | psql -v ON_ERROR_STOP=1 -w -h "${PGHOST}" -U "${PGUSER}" -d "${SCRATCH}"
+              # Confirm a seeded table exists after restore into scratch.
+              ROWS="$(psql -w -h "${PGHOST}" -U "${PGUSER}" -d "${SCRATCH}" -tAc \
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';")"
+              psql -v ON_ERROR_STOP=1 -w -h "${PGHOST}" -U "${PGUSER}" -d postgres \
+                -c "DROP DATABASE IF EXISTS ${SCRATCH};"
+              if [[ -z "${ROWS}" || "${ROWS}" -lt 1 ]]; then
+                echo "scratch restore produced no public tables" >&2
+                exit 1
+              fi
+              echo "validation ok (sha256 + scratch restore, tables=${ROWS})"
 
   restore:
     kind: StatefulSet
@@ -113,7 +161,7 @@ actions:
             - pipefail
             - -c
             - |
-              set -euxo pipefail
+              set -euo pipefail
               export AWS_EC2_METADATA_DISABLED=true
               export PGHOST="postgres.{{ .StatefulSet.Namespace }}.svc.cluster.local"
               export PGPORT="5432"
@@ -121,7 +169,7 @@ actions:
               export PGPASSWORD='{{ index .Phases.pgRestore.Secrets.pgSecret.Data "POSTGRES_PASSWORD" | toString }}'
               export PGDATABASE='{{ index .Phases.pgRestore.Secrets.pgSecret.Data "POSTGRES_DB" | toString }}'
               BACKUP_LOCATION='{{ .ArtifactsIn.cloudObject.KeyValue.backupLocation }}'
-              PROFILE_JSON='{"Location":{"type":"s3Compliant","bucket":"kanister-drills","endpoint":"http://seaweedfs.kanister.svc.cluster.local:8333","prefix":"drills/","region":"us-east-1"},"Credential":{"Type":"keyPair","KeyPair":{"ID":"admin","Secret":"admin12345"}},"SkipSSLVerify":true}'
+              EXPECTED_SHA='{{ .ArtifactsIn.cloudObject.KeyValue.backupSha256 }}'
               echo "START restore path=${BACKUP_LOCATION} host=${PGHOST}"
               for i in $(seq 1 60); do
                 if pg_isready -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}"; then
@@ -130,9 +178,14 @@ actions:
                 sleep 2
               done
               pg_isready -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}"
-              if ! kando location pull /tmp/backup.sql.gz --profile "${PROFILE_JSON}" --path "${BACKUP_LOCATION}" > /tmp/kando.out 2>&1; then
+              if ! kando location pull /tmp/backup.sql.gz --profile '{{ toJson .Profile }}' --path "${BACKUP_LOCATION}" > /tmp/kando.out 2>&1; then
                 echo "kando pull failed"
                 grep -iE 'error|fail|denied|unable|invalid|missing|forbidden|connect' /tmp/kando.out || tail -20 /tmp/kando.out
+                exit 1
+              fi
+              ACTUAL_SHA="$(sha256sum /tmp/backup.sql.gz | awk '{print $1}')"
+              if [[ -n "${EXPECTED_SHA}" && "${EXPECTED_SHA}" != "<no value>" && "${ACTUAL_SHA}" != "${EXPECTED_SHA}" ]]; then
+                echo "sha256 mismatch on restore: actual=${ACTUAL_SHA} expected=${EXPECTED_SHA}" >&2
                 exit 1
               fi
               gunzip -c -f /tmp/backup.sql.gz \

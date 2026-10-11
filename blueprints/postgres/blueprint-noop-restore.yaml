@@ -1,0 +1,91 @@
+apiVersion: cr.kanister.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: postgres-noop-restore
+  namespace: kanister
+  labels:
+    app.kubernetes.io/name: kanister-backup-restore
+    app.kubernetes.io/component: blueprint
+    justrunme.com/workload: postgres
+    justrunme.com/scenario: noop-restore
+actions:
+  # Share backup/validate/delete with the real blueprint shape so ActionSets can
+  # reference artifacts produced by postgres-app-aware. Only restore is a no-op.
+  backup:
+    kind: StatefulSet
+    outputArtifacts:
+      cloudObject:
+        keyValue:
+          backupLocation: "{{ .Phases.pgDump.Output.backupLocation }}"
+          backupSha256: "{{ .Phases.pgDump.Output.backupSha256 }}"
+          backupBytes: "{{ .Phases.pgDump.Output.backupBytes }}"
+          backupTimestamp: "{{ .Phases.pgDump.Output.backupTimestamp }}"
+          namespace: "{{ .StatefulSet.Namespace }}"
+          name: "{{ .StatefulSet.Name }}"
+    phases:
+      - func: KubeTask
+        name: pgDump
+        args:
+          image: ghcr.io/kanisterio/postgres-kanister-tools:0.118.0
+          namespace: "{{ .StatefulSet.Namespace }}"
+          command:
+            - bash
+            - -c
+            - |
+              echo "noop-restore blueprint must not run backup" >&2
+              exit 1
+
+  validate:
+    kind: StatefulSet
+    inputArtifactNames:
+      - cloudObject
+    phases:
+      - func: KubeTask
+        name: checkArtifact
+        args:
+          image: ghcr.io/kanisterio/postgres-kanister-tools:0.118.0
+          namespace: "{{ .StatefulSet.Namespace }}"
+          command:
+            - bash
+            - -c
+            - |
+              echo "noop-restore blueprint must not run validate" >&2
+              exit 1
+
+  restore:
+    kind: StatefulSet
+    inputArtifactNames:
+      - cloudObject
+    phases:
+      - func: KubeTask
+        name: pgRestore
+        args:
+          image: ghcr.io/kanisterio/postgres-kanister-tools:0.118.0
+          namespace: "{{ .StatefulSet.Namespace }}"
+          command:
+            - bash
+            - -o
+            - errexit
+            - -c
+            - |
+              set -euo pipefail
+              BACKUP_LOCATION='{{ .ArtifactsIn.cloudObject.KeyValue.backupLocation }}'
+              echo "NOOP restore — intentionally skipping data restore for path=${BACKUP_LOCATION}"
+              true
+
+  delete:
+    kind: StatefulSet
+    inputArtifactNames:
+      - cloudObject
+    phases:
+      - func: KubeTask
+        name: deleteDump
+        args:
+          image: ghcr.io/kanisterio/postgres-kanister-tools:0.118.0
+          namespace: "{{ .StatefulSet.Namespace }}"
+          command:
+            - bash
+            - -c
+            - |
+              echo "noop-restore blueprint must not run delete" >&2
+              exit 1

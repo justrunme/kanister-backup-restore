@@ -23,16 +23,15 @@ LOC="$(kubectl -n "$PROFILE_NS" get "actionset/${FROM}" -o jsonpath='{.status.ac
   echo "empty backupLocation on ${FROM}" >&2
   exit 1
 }
+SHA="$(kubectl -n "$PROFILE_NS" get "actionset/${FROM}" -o jsonpath='{.status.actions[0].artifacts.cloudObject.keyValue.backupSha256}' 2>/dev/null || true)"
 
-echo "restore from ${FROM} -> ns ${DRILL_NS}"
-echo "artifact: ${LOC}"
+echo "restore from ${FROM} -> ns ${DRILL_NS} (unseeded)"
+echo "artifact: ${LOC} sha256=${SHA:-unknown}"
 
-# Fresh namespace + Postgres (same credentials secret shape the blueprint expects)
-sed -e "s/name: demo-postgres/name: ${DRILL_NS}/g" \
-  -e "s/namespace: demo-postgres/namespace: ${DRILL_NS}/g" \
-  -e "s/postgres-seed/postgres-seed-${DRILL_NS}/g" \
-  "$ROOT/examples/postgres-statefulset.yaml" | kubectl apply -f -
-kubectl -n "$DRILL_NS" delete job "postgres-seed-${DRILL_NS}" --ignore-not-found
+# Fresh empty Postgres — no seed initdb; data must come from the backup.
+sed -e "s/name: restore-target/name: ${DRILL_NS}/g" \
+  -e "s/namespace: restore-target/namespace: ${DRILL_NS}/g" \
+  "$ROOT/examples/postgres-restore-target.yaml" | kubectl apply -f -
 kubectl -n "$DRILL_NS" rollout status "statefulset/${NAME}" --timeout=180s
 
 cat <<YAML | kubectl apply -f -
@@ -52,6 +51,7 @@ spec:
         cloudObject:
           keyValue:
             backupLocation: "${LOC}"
+            backupSha256: "${SHA}"
             namespace: "${DRILL_NS}"
             name: "${NAME}"
       object:

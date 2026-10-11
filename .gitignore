@@ -10,5 +10,9 @@
 .idea/
 .vscode/
 .evidence/
+.metrics/
+__pycache__/
+*.py[cod]
+.pytest_cache/
 kind-config.yaml.bak
 shellcheck-*/

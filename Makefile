@@ -2,7 +2,7 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
 .PHONY: help kind-up install-kanister minio demo-app apply-blueprints backup-drill validate-backup restore-drill \
-	full-drill recovery-drill prove evidence failure-drill ci cron
+	full-drill recovery-drill prove evidence failure-drill prune-backups test-evaluator ci cron
 
 help:
 	@awk 'BEGIN{FS=":.*##"} /^[a-zA-Z_-]+:.*##/{printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -54,9 +54,15 @@ full-drill: ## Kind bring-up + happy-path Recovery Contract drill
 	./scripts/break.sh reset
 	./scripts/recovery-drill.sh
 
-failure-drill: ## Inject failure then prove UNPROVED (SCENARIO=corrupt-artifact|…)
+failure-drill: ## Inject failure then prove UNPROVED (SCENARIO=corrupt-artifact|noop-restore|…)
 	chmod +x scripts/*.sh
 	./scripts/failure-drill.sh "$(SCENARIO)"
+
+prune-backups: ## Keep N newest backups (BACKUP_RETAIN_N=5)
+	./scripts/prune-backups.sh "$(BACKUP_RETAIN_N)"
+
+test-evaluator: ## Pytest for evaluate_contract
+	cd scripts && python3 -m pytest -q test_evaluate_contract.py
 
 evidence: ## Collect ActionSet evidence markdown
 	./scripts/collect-evidence.sh

@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.0] - 2026-10-11
+
+Restore proof hardening (Recovery Contract must not false-positive):
+
+- Pre-backup unique marker (uuid + timestamp); restore into unseeded DB; PROVE matches exact marker + row checksum
+- Negative scenario `noop-restore` → `UNPROVED` / `data_verification`
+- Unique backup object keys with sha256 metadata; retention (`BACKUP_RETAIN_N`); VALIDATE verifies sha256 + scratch SQL restore
+- S3 credentials only via Kanister Profile (`toJson .Profile`); no `set -x` in blueprint phases
+- Evaluator computes real evidence age, reads RTO from contract, exits `2` on UNPROVED; pytest coverage
+
 ## [1.0.0] - 2026-10-10
 
 First stable release of the Kanister Recovery Contract pack:

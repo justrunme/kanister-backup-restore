@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Inject failure modes that make a backup untrustworthy.
 # Usage: break.sh <scenario>
-#   corrupt-artifact | wrong-secret | schema-drift | slow-restore | reset
+#   corrupt-artifact | wrong-secret | schema-drift | slow-restore | noop-restore | reset
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -12,13 +12,14 @@ mkdir -p "$(dirname "$STATE_FILE")"
 
 usage() {
   cat <<EOF
-Usage: $0 <corrupt-artifact|wrong-secret|schema-drift|slow-restore|reset>
+Usage: $0 <corrupt-artifact|wrong-secret|schema-drift|slow-restore|noop-restore|reset>
 
 Scenarios prove which failure modes make recovery untrustworthy:
-  corrupt-artifact  truncate object so VALIDATE fails (gzip)
+  corrupt-artifact  truncate object so VALIDATE fails (sha256/gzip)
   wrong-secret      bad DB password so RESTORE auth fails
   schema-drift      drop recovery_markers so DATA VERIFY fails
   slow-restore      sleep gate so RTO check fails
+  noop-restore      restore ActionSet succeeds without applying data → UNPROVED
   reset             clear active break state
 EOF
 }
@@ -35,26 +36,10 @@ case "$SCENARIO" in
     exit 0
     ;;
   corrupt-artifact)
-    FROM="$(kubectl -n "$PROFILE_NS" get actionsets -l justrunme.com/phase=backup --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)"
-    [[ -n "$FROM" ]] || {
-      echo "no backup ActionSet — run backup-drill first" >&2
-      exit 1
-    }
-    LOC="$(kubectl -n "$PROFILE_NS" get "actionset/${FROM}" -o jsonpath='{.status.actions[0].artifacts.cloudObject.keyValue.backupLocation}')"
-    [[ -n "$LOC" ]] || {
-      echo "empty backupLocation" >&2
-      exit 1
-    }
-    # Overwrite from the runner (SigV4). In-cluster Jobs that wait on a
-    # service have hung this drill twice already.
-    CORRUPT="$(mktemp)"
-    printf 'NOT-A-GZIP-ARTIFACT' >"$CORRUPT"
-    "$ROOT/scripts/s3-object.sh" put "drills/${LOC}" "$CORRUPT"
-    rm -f "$CORRUPT"
+    # Corruption is applied in recovery-drill.sh after the fresh backup so
+    # the unique object key for this drill is the one that fails VALIDATE.
     cat >"$STATE_FILE" <<EOF
 BREAK_SCENARIO=corrupt-artifact
-BREAK_BACKUP_ACTIONSET=${FROM}
-BREAK_BACKUP_LOCATION=${LOC}
 EXPECTED_BLOCKED_AT=validate
 EOF
     echo "scenario corrupt-artifact armed (validate should FAIL)"
@@ -81,6 +66,13 @@ EXPECTED_BLOCKED_AT=rto
 BREAK_RTO_SLEEP_SECONDS=75
 EOF
     echo "scenario slow-restore armed (RTO should BREACH target)"
+    ;;
+  noop-restore)
+    cat >"$STATE_FILE" <<EOF
+BREAK_SCENARIO=noop-restore
+EXPECTED_BLOCKED_AT=verify
+EOF
+    echo "scenario noop-restore armed (data verification should FAIL)"
     ;;
   *)
     usage
