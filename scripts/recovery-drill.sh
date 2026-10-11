@@ -85,21 +85,28 @@ insert_proof_marker() {
   MARKER_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   MARKER_NOTE="drill-${DRILL_ID}-${MARKER_UUID}-${MARKER_TS}"
   echo "-- protect: writing proof marker ${MARKER_NOTE}"
-  kubectl -n "$DEMO_NS" exec "sts/${DEMO_STS}" -- \
-    psql -U postgres -d app -v ON_ERROR_STOP=1 -c \
-    "CREATE TABLE IF NOT EXISTS recovery_markers (
-       id SERIAL PRIMARY KEY,
-       note TEXT NOT NULL,
-       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-     );
-     INSERT INTO recovery_markers (note, created_at)
-     VALUES ('${MARKER_NOTE}', '${MARKER_TS}'::timestamptz);" >/dev/null
-
-  SOURCE_ROW_COUNT="$(kubectl -n "$DEMO_NS" exec "sts/${DEMO_STS}" -- \
-    psql -U postgres -d app -tAc 'SELECT COUNT(*) FROM recovery_markers;' | tr -d '[:space:]')"
-  SOURCE_CHECKSUM="$(kubectl -n "$DEMO_NS" exec "sts/${DEMO_STS}" -- \
-    psql -U postgres -d app -tAc \
-    "SELECT md5(COALESCE(string_agg(note, '|' ORDER BY id), ''));" | tr -d '[:space:]')"
+  # Single psql session: ensure schema, insert marker, emit row_count:checksum.
+  # Avoid '|' in SQL (shell/pipe ambiguity through kubectl exec).
+  local stats
+  stats="$(kubectl -n "$DEMO_NS" exec "sts/${DEMO_STS}" -- \
+    psql -U postgres -d app -v ON_ERROR_STOP=1 -tAc "
+CREATE TABLE IF NOT EXISTS recovery_markers (
+  id SERIAL PRIMARY KEY,
+  note TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO recovery_markers (note, created_at)
+VALUES ('${MARKER_NOTE}', TIMESTAMPTZ '${MARKER_TS}');
+SELECT COUNT(*)::text || ':' || md5(COALESCE(string_agg(note, chr(44) ORDER BY id), ''))
+FROM recovery_markers;
+")"
+  stats="$(echo "$stats" | tr -d '[:space:]')"
+  SOURCE_ROW_COUNT="${stats%%:*}"
+  SOURCE_CHECKSUM="${stats#*:}"
+  [[ -n "$SOURCE_ROW_COUNT" && -n "$SOURCE_CHECKSUM" && "$SOURCE_ROW_COUNT" != "$SOURCE_CHECKSUM" ]] || {
+    echo "failed to collect source proof stats (raw=${stats})" >&2
+    exit 1
+  }
   SOURCE_SCHEMA_HASH="$(kubectl -n "$DEMO_NS" exec "sts/${DEMO_STS}" -- \
     sh -c "pg_dump -U postgres -d app --schema-only 2>/dev/null | sha256sum | awk '{print \$1}'" | tr -d '[:space:]')"
 
@@ -435,13 +442,13 @@ if [[ "$checks_restore" == true ]]; then
   FOUND="$(kubectl -n "$DRILL_NS" exec sts/postgres -- \
     psql -U postgres -d app -tAc "SELECT COUNT(*) FROM recovery_markers WHERE note='${MARKER_NOTE}'" 2>/dev/null || echo 0)"
   FOUND="$(echo "$FOUND" | tr -d '[:space:]')"
-  RESTORE_ROWS="$(kubectl -n "$DRILL_NS" exec sts/postgres -- \
-    psql -U postgres -d app -tAc 'SELECT COUNT(*) FROM recovery_markers;' 2>/dev/null || echo 0)"
-  RESTORE_ROWS="$(echo "$RESTORE_ROWS" | tr -d '[:space:]')"
-  RESTORE_CHECKSUM="$(kubectl -n "$DRILL_NS" exec sts/postgres -- \
+  RESTORE_STATS="$(kubectl -n "$DRILL_NS" exec sts/postgres -- \
     psql -U postgres -d app -tAc \
-    "SELECT md5(COALESCE(string_agg(note, '|' ORDER BY id), ''));" 2>/dev/null || echo "")"
-  RESTORE_CHECKSUM="$(echo "$RESTORE_CHECKSUM" | tr -d '[:space:]')"
+    "SELECT COUNT(*)::text || ':' || md5(COALESCE(string_agg(note, chr(44) ORDER BY id), '')) FROM recovery_markers;" \
+    2>/dev/null || echo "0:")"
+  RESTORE_STATS="$(echo "$RESTORE_STATS" | tr -d '[:space:]')"
+  RESTORE_ROWS="${RESTORE_STATS%%:*}"
+  RESTORE_CHECKSUM="${RESTORE_STATS#*:}"
 
   if [[ "$FOUND" == "1" && "$RESTORE_ROWS" == "$SOURCE_ROW_COUNT" && "$RESTORE_CHECKSUM" == "$SOURCE_CHECKSUM" ]]; then
     checks_data=true
