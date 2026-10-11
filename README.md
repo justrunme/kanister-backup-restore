@@ -12,6 +12,8 @@ Restore should be proved, not assumed.
 [![Case study](https://img.shields.io/badge/case-justrunme.com-111111)](https://justrunme.com/cases/kanister-backup-restore/)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/justrunme/kanister-backup-restore/badge)](https://securityscorecards.dev/viewer/?uri=github.com/justrunme/kanister-backup-restore)
 
+Evidence: [docs/EVIDENCE.md](docs/EVIDENCE.md)
+
 Case study: [Kanister Backup & Restore](https://justrunme.com/cases/kanister-backup-restore/) · [Andrey Lesnikov](https://justrunme.com/)
 
 ## What it does
