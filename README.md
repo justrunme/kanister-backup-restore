@@ -159,19 +159,21 @@ make failure-drill SCENARIO=corrupt-artifact
 ```
 
 <p align="center">
-  <img src="docs/assets/recovery-drill.svg" alt="Kanister recovery drill terminal: PROVED RTO 16s and UNPROVED corrupt-artifact" width="100%" />
+  <img src="docs/assets/recovery-drill.svg" alt="Kanister recovery drill terminal capture from an earlier run (PROVED, UNPROVED corrupt-artifact); current measured RTO is in Results" width="100%" />
 </p>
 
 ## Results
 
-Measured from Recovery Drill CI (not estimates). Details: [docs/results.md](docs/results.md) · [docs/results.json](docs/results.json).
+Measured from Recovery Drill CI (not estimates). Details: [docs/results.md](docs/results.md) · [docs/results.json](docs/results.json). Evidence: [docs/EVIDENCE.md](docs/EVIDENCE.md) · run [38131463362](https://github.com/justrunme/kanister-backup-restore/actions/runs/38131463362).
 
 | Metric | k8s v1.37.0 | k8s v1.36.4 | Source |
 | --- | ---: | ---: | --- |
-| RTO (restore duration) | **16 s** | **16 s** | [38061727612](https://github.com/justrunme/kanister-backup-restore/actions/runs/38061727612) |
-| RPO | 26 s | 25 s | same run artifacts |
+| RTO (restore duration) | **8 s** | **8 s** | [38131463362](https://github.com/justrunme/kanister-backup-restore/actions/runs/38131463362) |
+| Component skew | **13 s** | **9 s** | same |
 | Happy-path verdict | **PROVED** | **PROVED** | `recovery-evidence-k8s-*` |
-| Failure `corrupt-artifact` | **UNPROVED** (`artifact_integrity`) | same | same run |
+| Failure `delete-s3-object` | **UNPROVED** (`isolated_restore`) | same | same |
+| Failure `corrupt-s3-object` | **UNPROVED** (`cross_component_consistency`) | same | same |
+| Failure `mismatched-recovery-points` | **UNPROVED** (`data_verification`) | same | same |
 
 ## License
 
