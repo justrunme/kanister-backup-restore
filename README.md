@@ -159,7 +159,7 @@ make failure-drill SCENARIO=corrupt-artifact
 ```
 
 <p align="center">
-  <img src="docs/assets/recovery-drill.svg" alt="Kanister recovery drill terminal: PROVED RTO 8s and UNPROVED corrupt-artifact" width="100%" />
+  <img src="docs/assets/recovery-drill.svg" alt="Kanister recovery drill terminal capture from an earlier run (PROVED, UNPROVED corrupt-artifact); current measured RTO is in Results" width="100%" />
 </p>
 
 ## Results
