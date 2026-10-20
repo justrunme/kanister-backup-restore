@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## [1.0.1] - 2026-10-20
+
+First tag after v1.0.0. Includes `docs/EVIDENCE.md` and `docs/results.json` in a tagged release, plus everything below that was listed as Unreleased, 1.2.0 and 1.1.0 (those versions were never tagged).
+
 ### Fixed
 - Compute `components.postgres` / `components.s3` from real restore+verification results (never hardcode true); CI asserts `s3=false` on delete-s3-object
 - Scope operator RBAC: namespaced Role in kanister + per-namespace RoleBindings for drill ns (no cluster-wide secrets)
