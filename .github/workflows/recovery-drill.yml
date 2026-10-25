@@ -7,14 +7,18 @@ on:
   schedule:
     - cron: '17 4 * * *'
 
+permissions:
+  contents: read
+
 jobs:
   shellcheck:
     name: Shellcheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install shellcheck
         run: |
+          # No upstream checksums file published for shellcheck releases; version pinned.
           wget -qO- "https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz" | tar -xJv
           sudo mv shellcheck-v0.10.0/shellcheck /usr/local/bin/
           shellcheck --version
@@ -25,10 +29,13 @@ jobs:
     name: Shell format check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install shfmt
         run: |
+          set -euo pipefail
+          SHFMT_SHA256=1f57a384d59542f8fac5f503da1f3ea44242f46dff969569e80b524d64b71dbc
           wget -qO /usr/local/bin/shfmt "https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64"
+          echo "${SHFMT_SHA256}  /usr/local/bin/shfmt" | sha256sum -c -
           chmod +x /usr/local/bin/shfmt
           shfmt -version
       - name: Check shell formatting
@@ -38,9 +45,9 @@ jobs:
     name: Evaluator unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pytest
-        run: python3 -m pip install pytest
+        run: python3 -m pip install pytest==9.1.1
       - name: Run unit tests
         working-directory: scripts
         run: python3 -m pytest -q test_evaluate_contract.py test_prove_consistency.py
@@ -55,25 +62,41 @@ jobs:
           - v1.37.0
           - v1.36.4
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install kind
         run: |
-          curl -Lo ./kind "https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64"
-          chmod +x ./kind
-          sudo mv ./kind /usr/local/bin/kind
+          set -euo pipefail
+          KIND_VERSION=v0.33.0
+          KIND_SHA256=aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
+          curl -fsSL -o kind-linux-amd64 "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  kind-linux-amd64" | sha256sum -c -
+          chmod +x kind-linux-amd64
+          sudo mv kind-linux-amd64 /usr/local/bin/kind
           kind version
 
       - name: Install kubectl
         run: |
-          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          set -euo pipefail
+          KUBECTL_VERSION=v1.37.0
+          KUBECTL_SHA256=6129359f4e1f3848a5572ccb0b26cf28b8ca08cef38c95a765b2f64a2c961a2f
+          curl -fsSL -o kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          echo "${KUBECTL_SHA256}  kubectl" | sha256sum -c -
           chmod +x kubectl
           sudo mv kubectl /usr/local/bin/
           kubectl version --client
 
       - name: Install Helm
         run: |
-          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          set -euo pipefail
+          HELM_VERSION=v3.22.1
+          HELM_SHA256=896cf63684a42a723d61c980369d6e588330927deb13676ca0d85006dd6da0ea
+          curl -fsSL -o "helm-${HELM_VERSION}-linux-amd64.tar.gz" \
+            "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm-${HELM_VERSION}-linux-amd64.tar.gz" | sha256sum -c -
+          tar -xzf "helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          sudo mv linux-amd64/helm /usr/local/bin/helm
+          rm -rf linux-amd64 "helm-${HELM_VERSION}-linux-amd64.tar.gz"
           helm version
 
       - name: Run full application recovery drill (happy path)
@@ -235,7 +258,7 @@ jobs:
 
       - name: Upload evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: recovery-evidence-k8s-${{ matrix.k8s }}
           path: /tmp/drill-out
@@ -259,16 +282,23 @@ jobs:
   operator-kind:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
       - name: Install kind kubectl
         run: |
           set -euo pipefail
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64
-          chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
-          curl -Lo kubectl "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          KIND_VERSION=v0.30.0
+          KIND_SHA256=517ab7fc89ddeed5fa65abf71530d90648d9638ef0c4cde22c2c11f8097b8889
+          curl -fsSL -o kind-linux-amd64 "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  kind-linux-amd64" | sha256sum -c -
+          chmod +x kind-linux-amd64 && sudo mv kind-linux-amd64 /usr/local/bin/kind
+
+          KUBECTL_VERSION=v1.37.0
+          KUBECTL_SHA256=6129359f4e1f3848a5572ccb0b26cf28b8ca08cef38c95a765b2f64a2c961a2f
+          curl -fsSL -o kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          echo "${KUBECTL_SHA256}  kubectl" | sha256sum -c -
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/kubectl
       - name: Create kind cluster
         run: kind create cluster --name recovery-operator
