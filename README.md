@@ -175,6 +175,11 @@ Measured from Recovery Drill CI (not estimates). Details: [docs/results.md](docs
 | Failure `corrupt-s3-object` | **UNPROVED** (`cross_component_consistency`) | same | same |
 | Failure `mismatched-recovery-points` | **UNPROVED** (`data_verification`) | same | same |
 
+## Author
+
+**Andrey Lesnikov** — Senior DevOps & AI Platform Engineer  
+ORCID: [https://orcid.org/0009-0004-7583-4314](https://orcid.org/0009-0004-7583-4314)
+
 ## License
 
 Apache-2.0 © Andrey Lesnikov
