@@ -79,14 +79,6 @@ This pack runs that path for real: Kind, Kanister, MinIO Profile, `pg_dump`, `ka
 
 ---
 
-## Quickstart
-
-```bash
-make full-drill
-```
-
----
-
 ## Failure drills
 
 Show which failure modes make a backup untrustworthy:
